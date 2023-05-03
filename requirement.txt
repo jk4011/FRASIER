@@ -1,0 +1,8 @@
+torch==1.12.1
+lightning==1.9
+xformer==1.0.1
+trimesh
+plotly
+-e git+https://github.com/jk4011/GeoTransformer.git#egg=geotransformer
+-e git+https://github.com/jk4011/NSM.git#egg=shape_assembly
+-e git+https://github.com/jk4011/multi_part_assembly.git#egg=multi_part_assembly
