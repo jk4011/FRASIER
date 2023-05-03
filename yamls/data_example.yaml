@@ -15,3 +15,5 @@ data:
 exp:
   num_workers: 1
   batch_size: 1
+
+debug: True
