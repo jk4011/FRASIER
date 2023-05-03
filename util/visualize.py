@@ -8,6 +8,7 @@ import trimesh
 import numpy as np
 import matplotlib.pyplot as plt
 
+import os
 
 
 
@@ -94,7 +95,6 @@ def show_multiple_objs(obj_files, colors=None, is_random_rotate=False, library="
         meshes = []
 
         for idx, obj_file in enumerate(obj_files):
-            import jhutil;jhutil.jhprint(0000,)
             vertices, faces = parse_obj_file(obj_file)
             x, y, z = vertices[:, 0], vertices[:, 1], vertices[:, 2]
             i, j, k = faces[:, 0], faces[:, 1], faces[:, 2]
@@ -123,6 +123,11 @@ def show_multiple_objs(obj_files, colors=None, is_random_rotate=False, library="
 
 
 
+def show_meshes(folder_path):
+    file_list = os.listdir(folder_path)
+    file_list = [os.path.join(folder_path, file) for file in file_list]
+    show_multiple_objs(file_list)
+
 def sample_point_cloud_from_mesh(mesh_file, num_points):
     # Load the mesh
     mesh = trimesh.load_mesh(mesh_file)
@@ -132,14 +137,20 @@ def sample_point_cloud_from_mesh(mesh_file, num_points):
     
     return point_cloud
 
-def show_point_clouds(point_clouds, colors, normals=None, is_random_rotate=False, s=None, range=((-1.1), (-1.1), (-1.1))):
+def show_point_clouds(point_clouds, colors=None, normals=None, is_random_rotate=False, s=None, range=((-1.1), (-1.1), (-1.1))):
     # type check point_clouds is list
-    if isinstance(point_clouds, list):
-        point_clouds = np.array(point_clouds)
+    # if isinstance(point_clouds, list):
+    #     point_clouds = np.array(point_clouds)
     if s is None:
         s = [0.3] * len(point_clouds)
 
-
+    if colors is None:
+        def rgb_to_hex(rgb):
+            return "#{:02x}{:02x}{:02x}".format(rgb[0], rgb[1], rgb[2])
+        colors = [[0, 204, 0], [204, 0, 0], [0, 0, 204], [127, 127, 0], [127, 0, 127], [0, 127, 127], [76, 153, 0], [153, 0, 76], [76, 0, 153], [153, 76, 0], [76, 0, 153], [153, 0, 76], [204, 51, 127], [204, 51, 127], [51, 204, 127], [51, 127, 204], [127, 51, 204], [127, 204, 51], [76, 76, 178], [76, 178, 76], [178, 76, 76]]
+        colors = [rgb_to_hex(color) for color in colors]
+        colors = colors[:len(point_clouds)]
+    
     # Set up the figure and axis for the 3D plot
     fig = plt.figure(figsize=(7,7))
     ax = fig.add_subplot(111, projection='3d')

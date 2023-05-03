@@ -87,16 +87,20 @@ class PartObjSet:
             distance = torch.norm(src - dst, dim=-1)
 
             knn = distance.topk(k, largest=False)
-            distance = knn.values.ravel().cpu()
-            indices = knn.indices.ravel().cpu()
+            distance = knn.values
+            indices = knn.indices
         else:
             knn = KNN(k=1, transpose_mode=True)
-            distance, indices = knn(src, dst)
+            distance, indices = knn(dst[None, :], src[None, :]) 
+        
+        distance = distance.ravel().cpu()
+        indices = indices.ravel().cpu()
 
         return distance, indices
 
 
     def _find_broken_point(self, points, d):
+        import jhutil;jhutil.jhprint(0000, points)
         indices = []
 
         for i in range(len(points)):
