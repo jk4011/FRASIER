@@ -100,7 +100,6 @@ class PartObjSet:
 
 
     def _find_broken_point(self, points, d):
-        import jhutil;jhutil.jhprint(0000, points)
         indices = []
 
         for i in range(len(points)):
