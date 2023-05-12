@@ -1,50 +1,50 @@
 
-from multi_part_assembly.datasets.geometry_data import build_geometry_dataset, build_geometry_dataloader
-from multi_part_assembly.datasets.geometry_data import GeometryPartDataset as BreakingBadDataset
+from multi_part_assembly.datasets.geometry_data import build_geometry_dataset, build_geometry_dataloader, save_geometry_dataset
+from multi_part_assembly.datasets.geometry_data import GeometryPartDataset
 import jhutil
 import torch
 from torch.utils.data import Dataset, DataLoader
-import torch
-
 
 from pytorch3d.transforms import matrix_to_quaternion, matrix_to_axis_angle, \
     quaternion_to_matrix, quaternion_to_axis_angle, \
     axis_angle_to_quaternion, axis_angle_to_matrix
 
+import argparse
+
+
 class PairBreakingBadDataset(Dataset):
-    def __init__(self, dataset: BreakingBadDataset):
-        leng_list = []
-        for data in dataset:
-            leng_list.append(len(data['broken_pcs']))
-        
-        num_pair_list = [leng * (leng - 1) / 2 for leng in leng_list]
-        
-        self.dataset = dataset
-        self.leng_list = leng_list
-        self.num_pair_list = num_pair_list
-    
-    
+    def __init__(self, datapath, adjacent_only=False, min_num_part=2, max_num_part=100):
+
+        raw_dataset = torch.load(datapath)
+        self.adjacent_only = adjacent_only
+
+        self.dataset = []
+        for data in raw_dataset:
+            if min_num_part <= len(data['broken_pcs']) <= max_num_part:
+                self.dataset.append(data)
+
+        self.adjacent_all = []
+        if not self.adjacent_only:
+            for i, data in enumerate(self.dataset):
+                leng = len(data['broken_pcs'])
+
+                adjacent_pair = []
+                for j in range(leng):
+                    for k in range(j):
+                        adjacent_pair.append([j, k])
+
+                self.dataset[i]["adjacent_pair"] = adjacent_pair
+
+                self.adjacent_all.append(adjacent_pair)
+
     def __len__(self):
-        return int(sum(self.num_pair_list))
-    
-    def _get_part_idx(self, object_idx, idx):
-        leng = self.leng_list[object_idx]
-        count = 0
-        for i in range(leng):
-            for j in range(i + 1, leng):
-                if count == idx:
-                    return i, j
-                count += 1
-            
-    
-    def _get_part_indices(n, index):
-        count = 0
-        for i in range(n):
-            for j in range(i + 1, n):
-                if count == index:
-                    return i, j
-                count += 1
-    
+        if not hasattr(self, "leng"):
+            self.leng = 0
+            for adjacent_pair in self.adjacent_all:
+                self.leng += len(adjacent_pair)
+
+        return self.leng
+
     def transform_matrix_from_quaternion_translation(self, quaternion, translation):
         rotation_matrix = quaternion_to_matrix(torch.tensor(quaternion))
         translation = translation.reshape(3, 1)
@@ -56,61 +56,92 @@ class PairBreakingBadDataset(Dataset):
         return transform_matrix
 
     def relative_transform_matrix(self, src_quat, ref_quat, src_trans, ref_trans):
-        src_transform_matrix = self.transform_matrix_from_quaternion_translation(src_quat, src_trans)
-        ref_transform_matrix = self.transform_matrix_from_quaternion_translation(ref_quat, ref_trans)
+        src_transform_matrix = self.transform_matrix_from_quaternion_translation(
+            src_quat, src_trans)
+        ref_transform_matrix = self.transform_matrix_from_quaternion_translation(
+            ref_quat, ref_trans)
 
-        # Calculate the inverse of the src_transform_matrix
-        src_transform_matrix_inv = torch.inverse(src_transform_matrix)
+        # Calculate the inverse of the ref_transform_matrix
+        ref_transform_matrix_inv = torch.inverse(ref_transform_matrix)
 
         # Calculate the relative transform matrix
-        relative_matrix = torch.matmul(src_transform_matrix_inv, ref_transform_matrix)
+        relative_matrix = torch.matmul(
+            ref_transform_matrix_inv, src_transform_matrix)
+        relative_matrix = relative_matrix.to(torch.float32).contiguous()
 
         return relative_matrix
 
-    
-    def __getitem__(self, index):
-        # index = int(index) % int(len(self))
-        
-        object_idx = 0
-        for n in self.num_pair_list:
-            if index < n:
-                break
+    def _get_index(self, index):
+        data_idx = 0
+        for adjacent_list in self.adjacent_all:
+            if index >= len(adjacent_list):
+                index -= len(adjacent_list)
+                data_idx += 1
             else:
-                object_idx += 1
-                index -= n
-        object = self.dataset[object_idx]
-        src_idx, ref_idx = self._get_part_idx(object_idx, index)
-        src_points = object['broken_pcs'][src_idx]
-        ref_points = object['broken_pcs'][ref_idx]
-        src_quat = object['quat'][src_idx]
-        ref_quat = object['quat'][ref_idx]
-        src_trans = object['trans'][src_idx]
-        ref_trans = object['trans'][ref_idx]
-        
-        transform = self.relative_transform_matrix(src_quat, ref_quat, src_trans, ref_trans)
-        
+                src_idx, ref_idx = adjacent_list[index]
+                break
+
+        return data_idx, src_idx, ref_idx
+
+    def __getitem__(self, index):
+
+        data_idx, src_idx, ref_idx = self._get_index(index)
+        data = self.dataset[data_idx]
+
+        src_points = data['broken_pcs'][src_idx]
+        ref_points = data['broken_pcs'][ref_idx]
+
+        src_quat = data['quat'][src_idx]
+        ref_quat = data['quat'][ref_idx]
+        src_trans = data['trans'][src_idx]
+        ref_trans = data['trans'][ref_idx]
+        file_names = data["file_names"]
+
+        transform = self.relative_transform_matrix(
+            src_quat, ref_quat, src_trans, ref_trans)
+
         out = {
-            "scene_name" : object["data_path"],
-            "ref_frame" : ref_idx,
-            "src_frame" : src_idx,
-            "ref_points" : ref_points,
-            "src_points" : src_points,
+            "scene_name": data["dir_name"].split("data_split/")[-1],
+            "dir_name": data["dir_name"],
+            "src_file_name": file_names[src_idx],
+            "ref_file_name": file_names[ref_idx],
+            "src_frame": src_idx,
+            "ref_frame": ref_idx,
+            "ref_points": ref_points.contiguous(),
+            "src_points": src_points.contiguous(),
             # "overlap": -1,
-            "ref_feats": torch.ones(len(src_points), 1),# "array[18977, 1] f32 74Kb x∈[1.000, 1.000] μ=1.000 σ=0.",
-            "src_feats": torch.ones(len(ref_points), 1),# "array[19082, 1] f32 75Kb x∈[1.000, 1.000] μ=1.000 σ=0.",
-            "transform" : transform,
+            "ref_feats": torch.ones(len(src_points), 1),
+            "src_feats": torch.ones(len(ref_points), 1),
+            "transform": transform,
         }
         return out
-        
-        
 
 
 if __name__ == "__main__":
-    torch.multiprocessing.set_start_method('spawn')
-    cfg = jhutil.load_yaml("yamls/data_example.yaml")
-    train_data, val_data = build_geometry_dataset(cfg)
-    train_data = PairBreakingBadDataset(train_data)
-    for data in train_data:
-        import jhutil;jhutil.jhprint(4444, data)
-        break
-    
+
+    # datafolder = "/data/wlsgur4011/DataCollection/BreakingBad/data_split/"
+    # artifact_train = f"{datafolder}artifact.train.pth"
+    # artifact_val = f"{datafolder}artifact.val.pth"
+    # everyday_train = f"{datafolder}everyday.train.pth"
+    # everyday_val = f"{datafolder}everyday.val.pth"
+
+    # dataset = PairBreakingBadDataset(artifact_train)
+
+    # import jhutil;jhutil.jhprint(1111, len(dataset))
+
+    if True:
+
+        # argparse
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--overfit', type=int, default=None)
+        parser.add_argument('--min_numpart', type=int, default=None)
+
+        # parse
+        args = parser.parse_args()
+
+        torch.multiprocessing.set_start_method('spawn')
+        cfg = jhutil.load_yaml("yamls/data_example.yaml")
+        if args.overfit is not None:
+            cfg.data.overfit = args.overfit
+
+        save_geometry_dataset(cfg)
