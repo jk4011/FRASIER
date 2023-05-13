@@ -7,12 +7,12 @@ data:
   dataset: geometry                                                                                   
   max_num_part: 20                                                                                    
   min_num_part: 3
-  total_points: 50000                                                                                 
-  overfit: -1
+  total_points: 50000                                                                               
+  overfit: 1
   rot_range: -1.0                                                                                     
   shuffle_parts: False
   scale: 7
 
 exp:
-  num_workers: 1
+  num_workers: 5
   batch_size: 1
