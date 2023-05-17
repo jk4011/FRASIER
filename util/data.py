@@ -13,10 +13,8 @@ import argparse
 
 
 class PairBreakingBadDataset(Dataset):
-    def __init__(self, datapath, adjacent_only=False, min_num_part=2, max_num_part=100):
-
+    def __init__(self, datapath, exclusive_pair=False, min_num_part=2, max_num_part=100):
         raw_dataset = torch.load(datapath)
-        self.adjacent_only = adjacent_only
 
         self.dataset = []
         for data in raw_dataset:
@@ -24,18 +22,22 @@ class PairBreakingBadDataset(Dataset):
                 self.dataset.append(data)
 
         self.adjacent_all = []
-        if not self.adjacent_only:
+        if exclusive_pair:
             for i, data in enumerate(self.dataset):
                 leng = len(data['broken_pcs'])
 
-                adjacent_pair = []
+                pairs = []
                 for j in range(leng):
                     for k in range(j):
-                        adjacent_pair.append([j, k])
+                        pairs.append([j, k])
 
-                self.dataset[i]["adjacent_pair"] = adjacent_pair
-
-                self.adjacent_all.append(adjacent_pair)
+                # overwrite into exclusive pair
+                self.dataset[i]["adjacent_pair"] = pairs
+                self.adjacent_all.append(pairs)
+        else:
+            for i, data in enumerate(self.dataset):
+                self.adjacent_all.append(data["adjacent_pair"])
+            
 
     def __len__(self):
         if not hasattr(self, "leng"):
@@ -90,6 +92,11 @@ class PairBreakingBadDataset(Dataset):
 
         src_points = data['broken_pcs'][src_idx]
         ref_points = data['broken_pcs'][ref_idx]
+        
+        # if len(src_points) > 1e4 and len(ref_points) > 1e4:
+        #     src_points = src_points[::2]
+        #     ref_points = ref_points[::2]
+        #     import jhutil; jhutil.jhprint(1111, )
 
         src_quat = data['quat'][src_idx]
         ref_quat = data['quat'][ref_idx]
