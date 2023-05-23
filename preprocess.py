@@ -4,11 +4,6 @@ from multi_part_assembly.datasets.geometry_data import GeometryPartDataset
 import jhutil
 import torch
 from torch.utils.data import Dataset, DataLoader
-
-from pytorch3d.transforms import matrix_to_quaternion, matrix_to_axis_angle, \
-    quaternion_to_matrix, quaternion_to_axis_angle, \
-    axis_angle_to_quaternion, axis_angle_to_matrix
-
 import argparse
 
 

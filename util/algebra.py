@@ -1,5 +1,6 @@
 import torch
 
+
 def get_rotation_matrix(v1, v2):
     """Returns the rotation matrix required to rotate v1 to v2."""
     v1 = v1 / torch.norm(v1)  # normalize v1
