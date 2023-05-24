@@ -8,42 +8,41 @@ import os
 
 class DatasetStage1(Dataset):
     def __init__(self,
-                 datapath,
+                 data_root,
                  scale=7,
                  sample_weight=50000):
-        self.dataset = torch.load(datapath)
-        
+        self.dataset = torch.load(data_root)
+
         self.n_part_objs = []
         for data in self.dataset:
             self.n_part_objs.append(len(data['file_names']))
-        
+
         self.sample_weight = sample_weight
         self.scale = scale
-                
+
     def __len__(self):
         return sum(self.n_part_objs)
-    
+
     def get_idx(self, idx):
-        
+
         for group_idx, n_part_obj in enumerate(self.n_part_objs):
             if idx < n_part_obj:
                 return group_idx, idx
             else:
                 idx -= n_part_obj
         raise ValueError('idx is out of range')
-    
-    
+
     def __getitem__(self, index):
         group_idx, part_idx = self.get_idx(index)
         group_obj = self.dataset[group_idx]
-        
+
         is_broken_vertices = group_obj['is_broken_vertices'][part_idx]
-        
+
         dir_name = group_obj['dir_name']
         file_name = group_obj['file_names'][part_idx]
         mesh_path = os.path.join(dir_name, file_name)
         mesh = trimesh.load_mesh(mesh_path)
-                
+
         faces = torch.Tensor(mesh.faces)  # (f_i, 3)
         area_faces = torch.Tensor(mesh.area_faces)  # (f_i)
 
@@ -55,31 +54,37 @@ class DatasetStage1(Dataset):
 
         total_area_broken = torch.sum(area_faces[is_face_broken])
         n_broken_sample = int(self.sample_weight * total_area_broken)
+        n_broken_sample = max(10, n_broken_sample)
         broken_face_weight = area_faces * is_face_broken
         broken_face_weight = broken_face_weight / torch.sum(broken_face_weight)
-        broken_sample = trimesh.sample.sample_surface(
-            mesh, n_broken_sample, broken_face_weight.numpy())[0]
+        broken_sample, face_indices = trimesh.sample.sample_surface(
+            mesh, n_broken_sample, broken_face_weight.numpy())
         broken_sample = torch.tensor(broken_sample)
-        
+        broken_normal = torch.tensor(mesh.face_normals[face_indices])
+
         total_area_skin = torch.sum(area_faces[(is_face_broken.logical_not())])
         n_skin_sample = int(self.sample_weight * total_area_skin)
+        n_skin_sample = max(10, n_skin_sample)
         skin_face_weight = area_faces * is_face_broken.logical_not()
         skin_face_weight = skin_face_weight / torch.sum(skin_face_weight)
-        skin_sample = trimesh.sample.sample_surface(
-            mesh, n_skin_sample, skin_face_weight.numpy())[0]
+        skin_sample, face_indices = trimesh.sample.sample_surface(
+            mesh, n_skin_sample, skin_face_weight.numpy())
         skin_sample = torch.tensor(skin_sample)
-        
+        skin_normal = torch.tensor(mesh.face_normals[face_indices])
+
         sample = torch.cat([broken_sample, skin_sample], dim=0)
-        # sample = broken_sample
         broken_label = torch.cat([torch.ones(n_broken_sample), torch.zeros(n_skin_sample)], dim=0).bool()
-        
+        normal = torch.cat([broken_normal, skin_normal], dim=0)
+
         # shuffle
         perm = torch.randperm(len(sample))
         sample = sample[perm]
         broken_label = broken_label[perm]
+        normal = normal[perm]
         
         data = {
             'sample': sample,  # (N, 3)
+            'normal': normal,
             'broken_label': broken_label,  # (N, )
             'path': mesh_path,
         }
