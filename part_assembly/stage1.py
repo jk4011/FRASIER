@@ -4,6 +4,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import trimesh
 import os
+from copy import copy
 
 
 class DatasetStage1(Dataset):
@@ -24,13 +25,13 @@ class DatasetStage1(Dataset):
         return sum(self.n_part_objs)
 
     def get_idx(self, idx):
-
         for group_idx, n_part_obj in enumerate(self.n_part_objs):
             if idx < n_part_obj:
                 return group_idx, idx
             else:
                 idx -= n_part_obj
-        raise ValueError('idx is out of range')
+
+        raise IndexError
 
     def __getitem__(self, index):
         group_idx, part_idx = self.get_idx(index)
@@ -54,7 +55,18 @@ class DatasetStage1(Dataset):
 
         total_area_broken = torch.sum(area_faces[is_face_broken])
         n_broken_sample = int(self.sample_weight * total_area_broken)
-        n_broken_sample = max(10, n_broken_sample)
+        n_broken_sample = max(1, n_broken_sample)
+            
+        total_area_skin = torch.sum(area_faces[(is_face_broken.logical_not())])
+        n_skin_sample = int(self.sample_weight * total_area_skin)
+        
+        # if part object is too small, scale it.
+        scale = copy(self.scale)
+        while n_broken_sample + n_skin_sample < 512:
+            n_broken_sample *= 2
+            n_skin_sample *= 2
+            scale *= 1.414
+        
         broken_face_weight = area_faces * is_face_broken
         broken_face_weight = broken_face_weight / torch.sum(broken_face_weight)
         broken_sample, face_indices = trimesh.sample.sample_surface(
@@ -62,9 +74,6 @@ class DatasetStage1(Dataset):
         broken_sample = torch.tensor(broken_sample)
         broken_normal = torch.tensor(mesh.face_normals[face_indices])
 
-        total_area_skin = torch.sum(area_faces[(is_face_broken.logical_not())])
-        n_skin_sample = int(self.sample_weight * total_area_skin)
-        n_skin_sample = max(10, n_skin_sample)
         skin_face_weight = area_faces * is_face_broken.logical_not()
         skin_face_weight = skin_face_weight / torch.sum(skin_face_weight)
         skin_sample, face_indices = trimesh.sample.sample_surface(
@@ -73,6 +82,7 @@ class DatasetStage1(Dataset):
         skin_normal = torch.tensor(mesh.face_normals[face_indices])
 
         sample = torch.cat([broken_sample, skin_sample], dim=0)
+        sample *= scale
         broken_label = torch.cat([torch.ones(n_broken_sample), torch.zeros(n_skin_sample)], dim=0).bool()
         normal = torch.cat([broken_normal, skin_normal], dim=0)
 
