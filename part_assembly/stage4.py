@@ -37,7 +37,6 @@ class Node:
         """
         pcd_transformed = matrix_transform(T, other.pcd)
         new_pcd, n_last_removed = pointcloud_xor(self.pcd, pcd_transformed)
-        import jhutil; jhutil.jhprint(5555, self.n_removed, other.n_removed, n_last_removed)
         n_removed = self.n_removed + other.n_removed + n_last_removed
 
         # since merging is commutitive, fix order.

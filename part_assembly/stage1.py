@@ -62,7 +62,7 @@ class DatasetStage1(Dataset):
         
         # if part object is too small, scale it.
         scale = copy(self.scale)
-        while n_broken_sample + n_skin_sample < 512:
+        while n_broken_sample + n_skin_sample < 1024:
             n_broken_sample *= 2
             n_skin_sample *= 2
             scale *= 1.414
@@ -92,6 +92,9 @@ class DatasetStage1(Dataset):
         broken_label = broken_label[perm]
         normal = normal[perm]
         
+        assert len(skin_sample) == n_skin_sample
+        assert len(broken_sample) == n_broken_sample
+        assert len(sample) >= 1024, f'{len(sample)}'
         data = {
             'sample': sample,  # (N, 3)
             'normal': normal,
