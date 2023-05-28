@@ -7,15 +7,18 @@ import os
 from copy import copy
 
 
-class DatasetStage1(Dataset):
+class Stage1SingleDataset(Dataset):
     def __init__(self,
                  data_root,
                  scale=7,
-                 sample_weight=50000):
+                 sample_weight=50000,
+                 overfit=-1):
         self.dataset = torch.load(data_root)
 
         self.n_part_objs = []
-        for data in self.dataset:
+        for i, data in enumerate(self.dataset):
+            if overfit == i:
+                break
             self.n_part_objs.append(len(data['file_names']))
 
         self.sample_weight = sample_weight

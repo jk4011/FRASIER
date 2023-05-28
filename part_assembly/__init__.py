@@ -1,2 +1,2 @@
-from .stage1 import DatasetStage1
-from .stage3 import PairBreakingBadDataset
+from .stage1 import Stage1SingleDataset
+from .stage3 import Stage3PairDataset

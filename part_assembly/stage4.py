@@ -8,22 +8,27 @@ from copy import deepcopy
 
 
 class Node:
-    def __init__(self, pcd, id, n_removed, n_last_removed):
-        self.id = id
+    def __init__(self, pcd, merge_state, n_removed, n_last_removed, T_dic=None):
+        self.pcd = pcd
+        self.merge_state = merge_state
         self.n_removed = n_removed
         self.n_last_removed = n_last_removed
-        self.pcd = pcd
-        # TODO: original pcd와 transformation matrix도 저장해 두기
+        
+        if T_dic is None:
+            assert isinstance(merge_state, int)
+            T_dic = {merge_state: torch.eye(4)}
+        self.T_dic = T_dic
+        # TODO: bundle adjustment를 위해 original pcd도 저장해 두기
 
     @property
     def num_pcd(self):
-        def count(id):
-            if isinstance(id, int):
+        def count(merge_state):
+            if isinstance(merge_state, int):
                 return 1
             else:
-                return count(id[0]) + count(id[1])
+                return count(merge_state[0]) + count(merge_state[1])
 
-        return count(self.id)
+        return count(self.merge_state)
 
     def merge(self, other, T):
         """merge two nodes
@@ -41,35 +46,40 @@ class Node:
 
         # since merging is commutitive, fix order.
         if self < other:
-            id = [self.id, other.id]
+            merge_state = [self.merge_state, other.merge_state]
         else:
-            id = [other.id, self.id]
+            merge_state = [other.merge_state, self.merge_state]
+            
+        # TODO: t @ T 인지 T @ t 인지 확인
+        other_T_dic = {merge_state: T @ prev_T for merge_state, prev_T in other.T_dic.items()}
+        T_dict = {**self.T_dic, **other_T_dic}
 
-        return Node(new_pcd, id, n_removed, n_last_removed)
+        return Node(new_pcd, merge_state, n_removed, n_last_removed, T_dict)
 
     def __eq__(self, other):
-        return self.id == other.id
+        return self.merge_state == other.merge_state
 
     def __gt__(self, other):
-        return str(self.id) > str(other.id)
+        return str(self.merge_state) > str(other.merge_state)
 
     def __lt__(self, other):
-        return str(self.id) < str(other.id)
+        return str(self.merge_state) < str(other.merge_state)
 
     def __hash__(self) -> int:
-        return str(self.id).__hash__()
+        return str(self.merge_state).__hash__()
 
     def __str__(self):
-        return str(self.id)
+        return str(self.merge_state)
 
 
 class Graph:
-    def __init__(self, pcd_list, full_pair=False):
+    def __init__(self, pcd_list, use_similarity=False):
         nodes = [Node(pcd, i, 0, 0) for i, pcd in enumerate(pcd_list)]
         self.nodes = nodes
         self.k = 3
-        self.update_similarity()
-        self.full_pair = full_pair
+        self.use_similarity = use_similarity
+        if self.use_similarity:
+            self.update_similarity()
 
     def update_similarity(self):
         # TODO: 기존에 있는 similarity를 업데이트하는 방식으로 바꾸기
@@ -97,15 +107,15 @@ class Graph:
         del self.nodes[max(i, j)]
         del self.nodes[min(i, j)]
         self.nodes.append(new_node)
-        self.update_similarity()
+        if self.use_similarity:
+            self.update_similarity()
 
     def search_one_step(self):
         # TODO : top p sample로 바꾸기
-        if self.full_pair:
-            pairs = [(i, j) for i in range(len(self.nodes)) for j in range(i, len(self.nodes))]
-            pairs = [(i, j) for i in range(5) for j in range(i, 5)]
-        else:
+        if self.use_similarity:
             pairs = top_k_indices(self.similarity, self.k)
+        else:
+            pairs = [(i, j) for i in range(len(self.nodes)) for j in range(i, len(self.nodes))]
 
         new_graph_lst = []
         for i, j in pairs:
@@ -114,8 +124,6 @@ class Graph:
             new_graph = deepcopy(self)
             new_graph.merge(i, j)
             new_graph_lst.append(new_graph)
-
-            print()
             assert self.depth + 1 == new_graph.depth
 
         return new_graph_lst
@@ -124,7 +132,7 @@ class Graph:
         assert self.depth == 0
         que = PriorityQueue()
         que.put([self.depth, -self.n_removed, self])
-        # TODO : top p sample로 바꾸기
+        # TODO: top p sample로 바꾸기
         search_count = [0] * self.num_pcd
 
         while not que.empty():
@@ -185,14 +193,15 @@ def pointcloud_xor(src: torch.Tensor, ref: torch.Tensor, threshold=0.01):
     return torch.cat((src, ref), dim=0), n_removed
 
 
-def top_k_indices(matrix, k):
+def top_k_indices(matrix, k, only_triu=True):
     assert matrix.shape[0] == matrix.shape[1]
     n = matrix.size(0)
     k = min(k, n * (n - 1) / 2)
     k = int(k)
 
-    # for upper triangle matrix replace into -1
-    matrix = torch.triu(matrix, diagonal=1)
+    # for upper triangle matrix replace into 0
+    if only_triu:
+        matrix = torch.triu(matrix, diagonal=1)
 
     # Flatten the matrix and get the values and indices of top-k elements
     values, indices = torch.topk(matrix.view(-1), k)
@@ -205,8 +214,9 @@ def top_k_indices(matrix, k):
     return indices
 
 
-def reproduce(pcd_list, id):
-    left, right = id
+def reproduce(pcd_list, merge_state):
+    # TODO: class graph로 바꾸기
+    left, right = merge_state
     if not isinstance(left, int):
         pcd1, n_removed1 = reproduce(pcd_list, left)
     else:
@@ -226,19 +236,20 @@ def reproduce(pcd_list, id):
 def test_reproduce():
     pcd_list = [torch.randn(1000, 3) for i in range(4)]
     result = Graph(pcd_list).search()
-    pcd_xored = result.nodes[0].pcd
-    
-    
+    final_node = result.nodes[0]
+    pcd_xored = final_node.pcd
+
+    import jhutil; jhutil.jhprint(1111, final_node.merge_state)
+    import jhutil; jhutil.jhprint(2222, final_node.T_dic)
     import jhutil; jhutil.jhprint(0000, "BFS done")
-    
+
     n_removed = result.n_removed
-    pcd_xored_re, n_removed_re = reproduce(pcd_list, result.nodes[0].id)
+    pcd_xored_re, n_removed_re = reproduce(pcd_list, final_node.merge_state)
     assert torch.sum(pcd_xored - pcd_xored_re) < 1e-6, f"{torch.sum(pcd_xored - pcd_xored_re)}"
     assert n_removed == n_removed_re, f"{n_removed} is differs from {n_removed_re}"
-    
+
     import jhutil; jhutil.jhprint(0000, "test_reproduce done")
 
 
 if __name__ == '__main__':
     test_reproduce()
-    
