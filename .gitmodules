@@ -1,0 +1,19 @@
+[submodule "geotransformer"]
+path = src/geotransformer
+url = dummy_string_to_satisfy_vscode
+
+[submodule "jhutil"]
+path = src/jhutil
+url = dummy_string_to_satisfy_vscode
+
+
+[submodule "pointnext"]
+path = src/pointnext
+url = dummy_string_to_satisfy_vscode
+
+
+[submodule "multi-part-assembly"]
+path = src/multi-part-assembly
+url = dummy_string_to_satisfy_vscode
+
+=
