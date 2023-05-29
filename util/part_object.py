@@ -19,7 +19,7 @@ import open3d as o3d
 # from knn_cuda import KNN
 
 from jhutil import show_point_clouds
-from .open3d_util import open3d_preprocess_pcd, open3d_ransac, open3d_icp, open3d_fast_global_registration
+from jhutil import open3d_preprocess_pcd, open3d_ransac, open3d_icp, open3d_fast_global_registration
 from .algebra import get_rotation_matrix
 
 
@@ -321,7 +321,7 @@ class PartObjSet:
             src, src_down, source_fpfh = open3d_preprocess_pcd(src_pcd, src_normal)
             dst, dst_down, target_fpfh = open3d_preprocess_pcd(dst_pcd, dst_normal)
 
-            transformation = open3d_icp(src, dst, voxel_size=0.01)
+            transformation = open3d_icp(src_pcd, dst_pcd, src_normal, dst_normal, voxel_size=0.01)
             self.objs[src_idx].transform(transformation)
 
 

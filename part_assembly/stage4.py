@@ -4,7 +4,15 @@ from typing import Union
 import random
 from queue import PriorityQueue
 from jhutil import matrix_transform
+from jhutil import load_yaml
+from jhutil import to_cuda
 from copy import deepcopy
+from .stage3 import geo_transformer
+from jhutil.log import create_logger
+from multi_part_assembly.datasets.geometry_data import build_geometry_dataset, build_geometry_dataloader
+
+logger = create_logger()
+
 
 
 class Node:
@@ -100,8 +108,12 @@ class Graph:
     def depth(self):
         return self.num_pcd - len(self.nodes)
 
+    @property
+    def state(self):
+        return set([str(node.merge_state) for node in self.nodes])
+    
     def merge(self, i, j):
-        T = geotransformer(self.nodes[i].pcd, self.nodes[j].pcd)
+        T = geo_transformer(self.nodes[i].pcd, self.nodes[j].pcd)
         # TODO: add icp
         new_node = self.nodes[i].merge(self.nodes[j], T)
         del self.nodes[max(i, j)]
@@ -138,6 +150,7 @@ class Graph:
         while not que.empty():
             depth, n_removed, graph = que.get()
             n_removed = -n_removed
+            logger.info(f"   state={graph.state}   depth={depth}   n_removed={n_removed}   ")
             if search_count[depth] >= self.k:
                 continue
             else:
@@ -173,10 +186,6 @@ def pointnext(pcd):
     feature = feature / torch.norm(feature)
     return feature
 
-
-def geotransformer(src, ref):
-    T = torch.eye(4)
-    return T
 
 
 def pointcloud_xor(src: torch.Tensor, ref: torch.Tensor, threshold=0.01):
@@ -217,39 +226,60 @@ def top_k_indices(matrix, k, only_triu=True):
 def reproduce(pcd_list, merge_state):
     # TODO: class graph로 바꾸기
     left, right = merge_state
+    
     if not isinstance(left, int):
         pcd1, n_removed1 = reproduce(pcd_list, left)
     else:
         pcd1 = pcd_list[left]
         n_removed1 = 0
+    
     if not isinstance(right, int):
         pcd2, n_removed2 = reproduce(pcd_list, right)
     else:
         pcd2 = pcd_list[right]
         n_removed2 = 0
 
-    final_pcd, n_removed = pointcloud_xor(pcd1, pcd2)
+    T = geo_transformer(pcd1, pcd2)
+    pcd2_transformed = matrix_transform(T, pcd2)
+    
+    pcd_xored, n_removed = pointcloud_xor(pcd1, pcd2_transformed)
     n_removed += n_removed1 + n_removed2
-    return final_pcd, n_removed
+    return pcd_xored, n_removed
 
 
-def test_reproduce():
-    pcd_list = [torch.randn(1000, 3) for i in range(4)]
-    result = Graph(pcd_list).search()
-    final_node = result.nodes[0]
-    pcd_xored = final_node.pcd
+def test_reproduce(n_iter=3, n_obj_threshold=5):
+    cfg = load_yaml("/data/wlsgur4011/part_assembly/yamls/data_example.yaml")
+    train_loader, val_loader = build_geometry_dataloader(cfg, use_saved=True)
+    
 
-    import jhutil; jhutil.jhprint(1111, final_node.merge_state)
-    import jhutil; jhutil.jhprint(2222, final_node.T_dic)
-    import jhutil; jhutil.jhprint(0000, "BFS done")
+    i = 0
+    for data in val_loader:
+        pcd_list = data["broken_pcs"]
+        if len(pcd_list) > n_obj_threshold:
+            continue
+        if i == n_iter:
+            break
+        i += 1
+        
+        # TODO: point cloud는 gpu memory에서만 다루기
+        # pcd_list = to_cuda(pcd_list)
+        
+        result = Graph(pcd_list).search()
+        final_node = result.nodes[0]
+        pcd_xored = final_node.pcd
 
-    n_removed = result.n_removed
-    pcd_xored_re, n_removed_re = reproduce(pcd_list, final_node.merge_state)
-    assert torch.sum(pcd_xored - pcd_xored_re) < 1e-6, f"{torch.sum(pcd_xored - pcd_xored_re)}"
-    assert n_removed == n_removed_re, f"{n_removed} is differs from {n_removed_re}"
+        import jhutil; jhutil.jhprint(1111, final_node.merge_state)
+        import jhutil; jhutil.jhprint(2222, final_node.T_dic)
+        import jhutil; jhutil.jhprint(0000, "BFS done")
+
+        n_removed = result.n_removed
+        pcd_xored_re, n_removed_re = reproduce(pcd_list, final_node.merge_state)
+        assert torch.sum(pcd_xored - pcd_xored_re) < 1e-6, f"{torch.sum(pcd_xored - pcd_xored_re)}"
+        assert n_removed == n_removed_re, f"{n_removed} is differs from {n_removed_re}"
 
     import jhutil; jhutil.jhprint(0000, "test_reproduce done")
 
 
-if __name__ == '__main__':
-    test_reproduce()
+def visualize_result():
+    # TODO: result를 visulaize해서 사진으로 저장해 두기
+    pass

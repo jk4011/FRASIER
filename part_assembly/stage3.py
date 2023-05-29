@@ -14,7 +14,7 @@ import numpy as np
 import sys
 from functools import partial
 
-sys.path.append("../src/geotransformer/experiments/lomatch/")
+sys.path.append("src/geotransformer/experiments/lomatch/")
 from config import make_cfg
 from model import create_model
 from geotransformer.utils.data import registration_collate_fn_stack_mode
@@ -44,7 +44,7 @@ def geo_transformer(src, ref):
     data = to_cuda(data)
 
     ret = model(data)
-    return ret["estimated_transform"]
+    return ret["estimated_transform"].cpu()
 
 
 def collate_fn(

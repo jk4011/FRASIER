@@ -8,7 +8,7 @@ data:
   max_num_part: 20                                                                                    
   min_num_part: 3
   total_points: 50000                                                                               
-  overfit: 1
+  overfit: 5
   rot_range: -1.0                                                                                     
   shuffle_parts: False
   scale: 7
