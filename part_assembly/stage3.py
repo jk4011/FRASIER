@@ -13,8 +13,8 @@ import argparse
 import numpy as np
 import sys
 from functools import partial
-
-sys.path.append("src/geotransformer/experiments/lomatch/")
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../src/geotransformer/experiments/lomatch/'))
 from config import make_cfg
 from model import create_model
 from geotransformer.utils.data import registration_collate_fn_stack_mode

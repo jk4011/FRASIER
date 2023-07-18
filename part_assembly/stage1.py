@@ -1,107 +1,122 @@
-from multi_part_assembly.datasets.geometry_data import build_geometry_dataset, build_geometry_dataloader, save_geometry_dataset
-from multi_part_assembly.datasets.geometry_data import GeometryPartDataset
-import torch
-from torch.utils.data import Dataset, DataLoader
-import trimesh
-import os
-from copy import copy
+
+from openpoints.utils import set_random_seed, save_checkpoint, load_checkpoint, resume_checkpoint, setup_logger_dist, \
+    cal_model_parm_nums, Wandb, generate_exp_directory, resume_exp_directory, EasyConfig, dist_utils, find_free_port
+
+from openpoints.models import build_model_from_cfg
+from openpoints.dataset import build_dataloader_from_cfg, get_features_by_keys, get_class_weights
+from jhutil import to_cuda
+from multi_part_assembly.datasets.geometry_data import build_geometry_dataloader
+from jhutil import load_yaml
 
 
-class Stage1SingleDataset(Dataset):
-    def __init__(self,
-                 data_root,
-                 scale=7,
-                 sample_weight=50000,
-                 overfit=-1):
-        self.dataset = torch.load(data_root)
 
-        self.n_part_objs = []
-        for i, data in enumerate(self.dataset):
-            if overfit == i:
-                break
-            self.n_part_objs.append(len(data['file_names']))
 
-        self.sample_weight = sample_weight
-        self.scale = scale
+def subsample(data, voxel_size=0.04, presample=True, split='test', voxel_max=7500, variable=False, shuffle=False):
 
-    def __len__(self):
-        return sum(self.n_part_objs)
+    sample = data['pos'].numpy()
+    normal = data['x'].numpy()
+    broken_label = data['y'].numpy().reshape(-1, 1)
 
-    def get_idx(self, idx):
-        for group_idx, n_part_obj in enumerate(self.n_part_objs):
-            if idx < n_part_obj:
-                return group_idx, idx
-            else:
-                idx -= n_part_obj
+    cdata = np.hstack((sample, normal, broken_label))  # (N, 7)
+    cdata[:, :3] -= np.min(cdata[:, :3], 0)
+    if voxel_size:
+        coord, feat, label = cdata[:, 0:3], cdata[:, 3:6], cdata[:, 6:7]
+        uniq_idx = voxelize(coord, voxel_size)
+        coord, feat, label = coord[uniq_idx], feat[uniq_idx], label[uniq_idx]
+        cdata = np.hstack((coord, feat, label))
 
-        raise IndexError
+    if presample:
+        coord, feat, label = np.split(cdata, [3, 6], axis=1)
+    else:
+        cdata[:, :3] -= np.min(cdata[:, :3], 0)
+        coord, feat, label = cdata[:, :3], cdata[:, 3:6], cdata[:, 6:7]
+        coord, feat, label = crop_pc(
+            coord, feat, label, split, voxel_size, voxel_max,
+            downsample=not presample, variable=variable, shuffle=shuffle)
 
-    def __getitem__(self, index):
-        group_idx, part_idx = self.get_idx(index)
-        group_obj = self.dataset[group_idx]
+    label = label.squeeze(-1).astype(np.long)
+    cls = np.zeros(1).astype(np.int64)
+    data = {'pos': torch.Tensor(coord)[None, :],
+            'x': torch.Tensor(feat)[None, :],
+            'y': torch.Tensor(label)[None, :],
+            'cls': torch.Tensor(cls)[None, :]}
+    return data
 
-        is_broken_vertices = group_obj['is_broken_vertices'][part_idx]
 
-        dir_name = group_obj['dir_name']
-        file_name = group_obj['file_names'][part_idx]
-        mesh_path = os.path.join(dir_name, file_name)
-        mesh = trimesh.load_mesh(mesh_path)
+def broken_surface_segmentation(model, data, is_subsample=False, feature_keys='x', all_broken_threshold=5000):
 
-        faces = torch.Tensor(mesh.faces)  # (f_i, 3)
-        area_faces = torch.Tensor(mesh.area_faces)  # (f_i)
+    model.eval()
+    broken_pcd_list = []
+    for i in range(len(data['pcs'])):
+        if len(data['pcs'][i]) > all_broken_threshold:
+            broken_pcd_list.append(data['pcs'][i])
 
-        is_face_broken = torch.zeros(len(faces), dtype=torch.bool)
-        for i, vertex_indice in enumerate(faces):
-            vertex_indice = vertex_indice.long()
-            is_vertex_broken = is_broken_vertices[vertex_indice]  # (3, )
-            is_face_broken[i] = torch.all(is_vertex_broken).item()
-
-        total_area_broken = torch.sum(area_faces[is_face_broken])
-        n_broken_sample = int(self.sample_weight * total_area_broken)
-        n_broken_sample = max(1, n_broken_sample)
-            
-        total_area_skin = torch.sum(area_faces[(is_face_broken.logical_not())])
-        n_skin_sample = int(self.sample_weight * total_area_skin)
-        
-        # if part object is too small, scale it.
-        scale = copy(self.scale)
-        while n_broken_sample + n_skin_sample < 1024:
-            n_broken_sample *= 2
-            n_skin_sample *= 2
-            scale *= 1.414
-        
-        broken_face_weight = area_faces * is_face_broken
-        broken_face_weight = broken_face_weight / torch.sum(broken_face_weight)
-        broken_sample, face_indices = trimesh.sample.sample_surface(
-            mesh, n_broken_sample, broken_face_weight.numpy())
-        broken_sample = torch.tensor(broken_sample)
-        broken_normal = torch.tensor(mesh.face_normals[face_indices])
-
-        skin_face_weight = area_faces * is_face_broken.logical_not()
-        skin_face_weight = skin_face_weight / torch.sum(skin_face_weight)
-        skin_sample, face_indices = trimesh.sample.sample_surface(
-            mesh, n_skin_sample, skin_face_weight.numpy())
-        skin_sample = torch.tensor(skin_sample)
-        skin_normal = torch.tensor(mesh.face_normals[face_indices])
-
-        sample = torch.cat([broken_sample, skin_sample], dim=0)
-        sample *= scale
-        broken_label = torch.cat([torch.ones(n_broken_sample), torch.zeros(n_skin_sample)], dim=0).bool()
-        normal = torch.cat([broken_normal, skin_normal], dim=0)
-
-        # shuffle
-        perm = torch.randperm(len(sample))
-        sample = sample[perm]
-        broken_label = broken_label[perm]
-        normal = normal[perm]
-        
-        assert len(skin_sample) == n_skin_sample
-        assert len(broken_sample) == n_broken_sample
-        assert len(sample) >= 1024, f'{len(sample)}'
-        data = {
-            'sample': sample,  # (N, 3)
-            'normal': normal,
-            'broken_label': broken_label,  # (N, )
-            'path': mesh_path,
+        import jhutil; jhutil.jhprint(1111, )
+        data2 = {
+            "pos": data['pcs'][i].float().squeeze()[None, :],
+            "x": data['normals'][i].float().squeeze()[None, :],
         }
-        return data
+        import jhutil; jhutil.jhprint(2222, )
+
+        # import jhutil; jhutil.jhprint(1111, data2['x'])
+
+        if is_subsample:
+            data2 = subsample(data2)
+        import jhutil; jhutil.jhprint(3333, )
+
+        data2 = to_cuda(data2)
+
+        data2['x'] = get_features_by_keys(data2, feature_keys)
+        import jhutil; jhutil.jhprint(4000, data2)
+        res = model(data2).argmax(dim=1).squeeze()
+        import jhutil; jhutil.jhprint(4444, )
+
+        pcd = data2['pos'][0]
+        broken_pcd_list.append(pcd[res == 1])
+
+    return broken_pcd_list
+
+
+def load_pointnext(cfg_path="/data/wlsgur4011/part_assembly/src/pointnext/cfgs/part_assembly/pointnext-l.yaml",
+                   model_path="/data/wlsgur4011/part_assembly/src/pointnext/log/part_assembly/part_assembly-train-pointnext-l-ngpus4-seed133-20230717-164009-iRRq2TtktfTLaggpLBmHea/checkpoint/part_assembly-train-pointnext-l-ngpus4-seed133-20230717-164009-iRRq2TtktfTLaggpLBmHea_ckpt_best.pth"):
+    cfg = EasyConfig()
+    cfg.load(cfg_path, recursive=True)
+
+    pointnext = build_model_from_cfg(cfg.model).cuda()
+    best_epoch, best_val = load_checkpoint(pointnext, pretrained_path=model_path)
+    pointnext.eval()
+
+    return pointnext
+
+
+def stage1_preprocess(overfit=5,
+                      train_data_path="/data/wlsgur4011/DataCollection/BreakingBad/data_split/preprocessed_artifact.val.pth",
+                      val_data_path="/data/wlsgur4011/DataCollection/BreakingBad/data_split/preprocessed_artifact.train.pth"):
+    pointnext = load_pointnext().cuda()
+    data_cfg = load_yaml("/data/wlsgur4011/part_assembly/yamls/data_example.yaml")
+    train_loader, val_loader = build_geometry_dataloader(data_cfg, use_saved=True)
+
+    broken_pcd_list = []
+    for data in train_loader:
+        if len(broken_pcd_list) >= overfit:
+            break
+        import jhutil; jhutil.jhprint(1111, )
+        broken_pcd = broken_surface_segmentation(pointnext, data)
+        broken_pcd_list.append(broken_pcd)
+        import jhutil; jhutil.jhprint(2222, )
+    torch.save(broken_pcd_list, train_data_path)
+    import jhutil; jhutil.jhprint(3333, )
+    del broken_pcd_list
+
+    broken_pcd_list = []
+    for data in val_loader:
+        if len(broken_pcd_list) >= overfit:
+            break
+        broken_pcd = broken_surface_segmentation(pointnext, data)
+        broken_pcd_list.append(broken_pcd)
+    torch.save(broken_pcd_list, val_data_path)
+    del broken_pcd_list
+
+
+if __name__ == "__main__":
+    stage1_preprocess()
