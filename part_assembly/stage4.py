@@ -47,14 +47,14 @@ class Fracture:
         return count(self.merge_state)
 
     def merge(self, other, T):
-        """merge two nodes
+        """merge two fracs
 
         Args:
-            other (Node): other node
+            other (Fracture): other frac
             T (torch.Tensor): homofrac_sety transformation matrix
 
         Returns:
-            new_node: merged node
+            new_frac: merged frac
         """
         pcd_transformed = matrix_transform(T, other.pcd)
         new_pcd, n_last_removed = pointcloud_xor(self.pcd, pcd_transformed)
@@ -89,7 +89,7 @@ class Fracture:
 
 class FractureSet:
     def __init__(self, pcd_list, use_similarity=False, use_icp=True):
-        self.fracs = [Fracture(pcd, i, 0, 0) for i, pcd in enumerate(pcd_list)]
+        self.fracs = [Fracture(pcd, merge_state=i, n_removed=0, n_last_removed=0) for i, pcd in enumerate(pcd_list)]
         self.k = 3
         self.use_similarity = use_similarity
         self.use_icp = use_icp
@@ -98,7 +98,7 @@ class FractureSet:
 
     def update_similarity(self):
         # TODO: 기존에 있는 similarity를 업데이트하는 방식으로 바꾸기
-        self.feature_lst = torch.stack([pointnext(node.pcd) for node in self.fracs], dim=0)
+        self.feature_lst = torch.stack([pointnext(frac.pcd) for frac in self.fracs], dim=0)
         self.similarity = self.feature_lst @ self.feature_lst.T  # (n, n)
         self.similarity = (self.similarity + 1) / 2
         self.similarity = self.similarity - torch.eye(self.similarity.shape[0])
@@ -181,7 +181,7 @@ class FractureSet:
                 que.put(data)
 
     def __str__(self) -> str:
-        return str([str(node) for node in self.fracs])
+        return str([str(frac) for frac in self.fracs])
 
     def __gt__(self, other):
         if self == other:
@@ -194,7 +194,7 @@ class FractureSet:
         return str(self) < str(other)
 
     def __eq__(self, other):
-        return set(self.fracs) == set(other.nodes)
+        return set(self.fracs) == set(other.fracs)
 
 
 def is_item_in_priority_queue(pq, item):
@@ -281,15 +281,15 @@ def test_reproduce(n_iter=10, n_obj_threshold=5):
         # pcd_list = to_cuda(pcd_list)
         
         result = FractureSet(pcd_list).search()
-        final_node = result.nodes[0]
-        pcd_xored = final_node.pcd
+        final_frac = result.fracs[0]
+        pcd_xored = final_frac.pcd
 
-        import jhutil; jhutil.jhprint(1111, final_node.merge_state)
-        import jhutil; jhutil.jhprint(2222, final_node.T_dic)
+        import jhutil; jhutil.jhprint(1111, final_frac.merge_state)
+        import jhutil; jhutil.jhprint(2222, final_frac.T_dic)
         import jhutil; jhutil.jhprint(5555, result.n_removed)
 
         n_removed = result.n_removed
-        pcd_xored_re, n_removed_re = reproduce(pcd_list, final_node.merge_state)
+        pcd_xored_re, n_removed_re = reproduce(pcd_list, final_frac.merge_state)
         # assert torch.sum(pcd_xored - pcd_xored_re) < 1e-6, f"{torch.sum(pcd_xored - pcd_xored_re)}"
         if n_removed != n_removed_re:
             import jhutil; jhutil.jhprint(0000, f"{n_removed} is differs from {n_removed_re}")
