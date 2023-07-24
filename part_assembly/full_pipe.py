@@ -4,7 +4,7 @@ from multi_part_assembly.datasets.geometry_data import build_geometry_dataloader
 from jhutil import load_yaml
 from jhutil import matrix_from_quat_trans, show_multiple_objs
 import os
-from part_assembly.stage4 import Graph
+from part_assembly.stage4 import FractureSet
 
 
 def fracture_assembly():
@@ -31,7 +31,7 @@ def fracture_assembly():
         # TODO: point cloud는 gpu memory에서만 다루기
         # pcd_list = to_cuda(pcd_list)
 
-        result = Graph(pcd_list).search()
+        result = FractureSet(pcd_list).search()
         final_node = result.nodes[0]
         pcd_xored = final_node.pcd
 

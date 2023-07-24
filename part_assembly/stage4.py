@@ -23,7 +23,7 @@ logger = create_logger()
 
 
 
-class Node:
+class Fracture:
     def __init__(self, pcd, merge_state, n_removed, n_last_removed, T_dic=None):
         self.pcd = pcd
         self.merge_state = merge_state
@@ -51,7 +51,7 @@ class Node:
 
         Args:
             other (Node): other node
-            T (torch.Tensor): homography transformation matrix
+            T (torch.Tensor): homofrac_sety transformation matrix
 
         Returns:
             new_node: merged node
@@ -69,7 +69,7 @@ class Node:
         other_T_dic = {merge_state: T @ prev_T for merge_state, prev_T in other.T_dic.items()}
         T_dict = {**self.T_dic, **other_T_dic}
 
-        return Node(new_pcd, merge_state, n_removed, n_last_removed, T_dict)
+        return Fracture(new_pcd, merge_state, n_removed, n_last_removed, T_dict)
 
     def __eq__(self, other):
         return self.merge_state == other.merge_state
@@ -87,10 +87,9 @@ class Node:
         return str(self.merge_state)
 
 
-class Graph:
+class FractureSet:
     def __init__(self, pcd_list, use_similarity=False, use_icp=True):
-        nodes = [Node(pcd, i, 0, 0) for i, pcd in enumerate(pcd_list)]
-        self.nodes : list[Node] = nodes
+        self.fracs = [Fracture(pcd, i, 0, 0) for i, pcd in enumerate(pcd_list)]
         self.k = 3
         self.use_similarity = use_similarity
         self.use_icp = use_icp
@@ -99,37 +98,37 @@ class Graph:
 
     def update_similarity(self):
         # TODO: 기존에 있는 similarity를 업데이트하는 방식으로 바꾸기
-        self.feature_lst = torch.stack([pointnext(node.pcd) for node in self.nodes], dim=0)
+        self.feature_lst = torch.stack([pointnext(node.pcd) for node in self.fracs], dim=0)
         self.similarity = self.feature_lst @ self.feature_lst.T  # (n, n)
         self.similarity = (self.similarity + 1) / 2
         self.similarity = self.similarity - torch.eye(self.similarity.shape[0])
 
     @property
     def n_removed(self):
-        return sum([node.n_removed for node in self.nodes])
+        return sum([frac.n_removed for frac in self.fracs])
 
     @property
     def num_pcd(self):
-        return sum(node.num_pcd for node in self.nodes)
+        return sum(frac.num_pcd for frac in self.fracs)
 
     @property
     def depth(self):
-        return self.num_pcd - len(self.nodes)
+        return self.num_pcd - len(self.fracs)
 
     @property
     def state(self):
-        return set([str(node.merge_state) for node in self.nodes])
+        return set([str(frac.merge_state) for frac in self.fracs])
     
     def merge(self, i, j):
-        src = self.nodes[i].pcd
-        ref = self.nodes[j].pcd
+        src = self.fracs[i].pcd
+        ref = self.fracs[j].pcd
         T = geo_transformer(src, ref)
         if self.use_icp:
             T = open3d_icp(ref, src, trans_init=T)
-        new_node = self.nodes[i].merge(self.nodes[j], T)
-        del self.nodes[max(i, j)]
-        del self.nodes[min(i, j)]
-        self.nodes.append(new_node)
+        new_frac = self.fracs[i].merge(self.fracs[j], T)
+        del self.fracs[max(i, j)]
+        del self.fracs[min(i, j)]
+        self.fracs.append(new_frac)
         if self.use_similarity:
             self.update_similarity()
 
@@ -138,49 +137,51 @@ class Graph:
             pairs = top_k_indices(self.similarity, self.k)
         else:
             # TODO : object 개수 바탕으로 pair 개수 조절하기
-            pairs = [(i, j) for i in range(len(self.nodes)) for j in range(i, len(self.nodes))]
+            pairs = [(i, j) for i in range(len(self.fracs)) for j in range(i, len(self.fracs))]
 
-        new_graph_lst = []
+        new_frac_set_lst = []
         for i, j in pairs:
             if i == j:
                 continue
-            new_graph = deepcopy(self)
-            new_graph.merge(i, j)
-            new_graph_lst.append(new_graph)
-            assert self.depth + 1 == new_graph.depth
+            new_frac_set = deepcopy(self)
+            new_frac_set.merge(i, j)
+            new_frac_set_lst.append(new_frac_set)
+            assert self.depth + 1 == new_frac_set.depth
 
-        return new_graph_lst
+        return new_frac_set_lst
 
     def search(self):
         assert self.depth == 0
         que = PriorityQueue()
         que.put([self.depth, -self.n_removed, self])
+        
+        # for top k search
         search_count = [0] * self.num_pcd
 
         while not que.empty():
-            depth, n_removed, graph = que.get()
+            depth, n_removed, frac_set = que.get()
             n_removed = -n_removed
             
             if search_count[depth] >= self.k:
                 continue
             
             search_count[depth] += 1
-            logger.info(f"state={graph.state}   depth={depth}   n_removed={n_removed}   ")
+            logger.info(f"state={frac_set.state}   depth={depth}   n_removed={n_removed}   ")
             
             if depth == self.num_pcd - 1:
                 if search_count != [1] + [self.k] * (self.num_pcd - 2) + [1]:
                     raise Warning(f"search_count is incorrect: {search_count}")
-                return graph
+                return frac_set
 
-            new_graph_lst = graph.search_one_step()
-            for new_graph in new_graph_lst:
-                data = [new_graph.depth, -new_graph.n_removed, new_graph]
+            new_frac_set_lst = frac_set.search_one_step()
+            for new_frac_set in new_frac_set_lst:
+                data = [new_frac_set.depth, -new_frac_set.n_removed, new_frac_set]
                 if is_item_in_priority_queue(que, data):
                     continue
                 que.put(data)
 
     def __str__(self) -> str:
-        return str([str(node) for node in self.nodes])
+        return str([str(node) for node in self.fracs])
 
     def __gt__(self, other):
         if self == other:
@@ -192,8 +193,8 @@ class Graph:
             return False
         return str(self) < str(other)
 
-    def __eq__(self, other: object):
-        return set(self.nodes) == set(other.nodes)
+    def __eq__(self, other):
+        return set(self.fracs) == set(other.nodes)
 
 
 def is_item_in_priority_queue(pq, item):
@@ -240,7 +241,7 @@ def top_k_indices(matrix, k, only_triu=True):
 
 
 def reproduce(pcd_list, merge_state):
-    # TODO: class graph로 바꾸기
+    # TODO: class frac_set로 바꾸기
     left, right = merge_state
     
     if not isinstance(left, int):
@@ -279,7 +280,7 @@ def test_reproduce(n_iter=10, n_obj_threshold=5):
         # TODO: point cloud는 gpu memory에서만 다루기
         # pcd_list = to_cuda(pcd_list)
         
-        result = Graph(pcd_list).search()
+        result = FractureSet(pcd_list).search()
         final_node = result.nodes[0]
         pcd_xored = final_node.pcd
 
