@@ -1,4 +1,4 @@
-from multi_part_assembly.datasets.geometry_data import build_geometry_dataset, build_geometry_dataloader, save_geometry_dataset
+from multi_part_assembly.datasets.geometry_data import build_geometry_dataset, build_geometry_dataloader
 from multi_part_assembly.datasets.geometry_data import GeometryPartDataset
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -6,6 +6,7 @@ import trimesh
 import os
 from copy import copy
 import numpy as np
+
 
 class Stage1SingleDataset(Dataset):
     def __init__(self,

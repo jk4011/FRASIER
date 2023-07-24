@@ -7,6 +7,8 @@ from openpoints.dataset import build_dataloader_from_cfg, get_features_by_keys, 
 from jhutil import to_cuda
 from multi_part_assembly.datasets.geometry_data import build_geometry_dataloader
 from jhutil import load_yaml
+import torch
+import numpy as np
 
 
 
@@ -47,32 +49,27 @@ def broken_surface_segmentation(model, data, is_subsample=False, feature_keys='x
 
     model.eval()
     broken_pcd_list = []
-    for i in range(len(data['pcs'])):
-        if len(data['pcs'][i]) > all_broken_threshold:
-            broken_pcd_list.append(data['pcs'][i])
+    for i in range(len(data['pcs'])):        
+        if len(data['pcs'][i][0]) < all_broken_threshold:
+            broken_pcd_list.append(data['pcs'][i].squeeze().cpu())
+            continue
 
-        import jhutil; jhutil.jhprint(1111, )
         data2 = {
             "pos": data['pcs'][i].float().squeeze()[None, :],
             "x": data['normals'][i].float().squeeze()[None, :],
         }
-        import jhutil; jhutil.jhprint(2222, )
-
-        # import jhutil; jhutil.jhprint(1111, data2['x'])
 
         if is_subsample:
             data2 = subsample(data2)
-        import jhutil; jhutil.jhprint(3333, )
 
         data2 = to_cuda(data2)
 
         data2['x'] = get_features_by_keys(data2, feature_keys)
-        import jhutil; jhutil.jhprint(4000, data2)
-        res = model(data2).argmax(dim=1).squeeze()
-        import jhutil; jhutil.jhprint(4444, )
+        with torch.no_grad():
+            res = model(data2).argmax(dim=1).squeeze()
 
         pcd = data2['pos'][0]
-        broken_pcd_list.append(pcd[res == 1])
+        broken_pcd_list.append(pcd[res == 1].cpu())
 
     return broken_pcd_list
 
@@ -100,12 +97,9 @@ def stage1_preprocess(overfit=5,
     for data in train_loader:
         if len(broken_pcd_list) >= overfit:
             break
-        import jhutil; jhutil.jhprint(1111, )
         broken_pcd = broken_surface_segmentation(pointnext, data)
         broken_pcd_list.append(broken_pcd)
-        import jhutil; jhutil.jhprint(2222, )
     torch.save(broken_pcd_list, train_data_path)
-    import jhutil; jhutil.jhprint(3333, )
     del broken_pcd_list
 
     broken_pcd_list = []

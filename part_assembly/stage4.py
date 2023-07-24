@@ -88,11 +88,12 @@ class Node:
 
 
 class Graph:
-    def __init__(self, pcd_list, use_similarity=False):
+    def __init__(self, pcd_list, use_similarity=False, use_icp=True):
         nodes = [Node(pcd, i, 0, 0) for i, pcd in enumerate(pcd_list)]
-        self.nodes = nodes
+        self.nodes : list[Node] = nodes
         self.k = 3
         self.use_similarity = use_similarity
+        self.use_icp = use_icp
         if self.use_similarity:
             self.update_similarity()
 
@@ -123,8 +124,8 @@ class Graph:
         src = self.nodes[i].pcd
         ref = self.nodes[j].pcd
         T = geo_transformer(src, ref)
-        T = open3d_icp(ref, src, trans_init=T)
-        # TODO: add icp
+        if self.use_icp:
+            T = open3d_icp(ref, src, trans_init=T)
         new_node = self.nodes[i].merge(self.nodes[j], T)
         del self.nodes[max(i, j)]
         del self.nodes[min(i, j)]
@@ -133,10 +134,10 @@ class Graph:
             self.update_similarity()
 
     def search_one_step(self):
-        # TODO : top p sample로 바꾸기
         if self.use_similarity:
             pairs = top_k_indices(self.similarity, self.k)
         else:
+            # TODO : object 개수 바탕으로 pair 개수 조절하기
             pairs = [(i, j) for i in range(len(self.nodes)) for j in range(i, len(self.nodes))]
 
         new_graph_lst = []
@@ -164,7 +165,7 @@ class Graph:
                 continue
             
             search_count[depth] += 1
-            logger.info(f"current location:   state={graph.state}   depth={depth}   n_removed={n_removed}   ")
+            logger.info(f"state={graph.state}   depth={depth}   n_removed={n_removed}   ")
             
             if depth == self.num_pcd - 1:
                 if search_count != [1] + [self.k] * (self.num_pcd - 2) + [1]:
@@ -173,7 +174,10 @@ class Graph:
 
             new_graph_lst = graph.search_one_step()
             for new_graph in new_graph_lst:
-                que.put([new_graph.depth, -new_graph.n_removed, new_graph])
+                data = [new_graph.depth, -new_graph.n_removed, new_graph]
+                if is_item_in_priority_queue(que, data):
+                    continue
+                que.put(data)
 
     def __str__(self) -> str:
         return str([str(node) for node in self.nodes])
@@ -191,6 +195,12 @@ class Graph:
     def __eq__(self, other: object):
         return set(self.nodes) == set(other.nodes)
 
+
+def is_item_in_priority_queue(pq, item):
+    for element in pq.queue:
+        if element == item:
+            return True
+    return False
 
 
 

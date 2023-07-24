@@ -1,16 +1,16 @@
 data: 
   category: ''                                                                                  
   colors: [[0, 204, 0], [204, 0, 0], [0, 204, 0], [127, 127, 0], [127, 0, 127], [0, 127, 127], [76, 153, 0], [153, 0, 76], [76, 0, 153], [153, 76, 0], [76, 0, 153], [153, 0, 76], [204, 51, 127], [204, 51, 127], [51, 204, 127], [51, 127, 204], [127, 51, 204], [127, 204, 51], [76, 76, 178], [76, 178, 76], [178, 76, 76]]
-  data_dir: /data/wlsgur4011/DataCollection/BreakingBad/data_split                                    
-  data_fn: artifact.{}.txt                                                                            
+  data_dir: /data/wlsgur4011/part_assembly/data
+  data_fn: artifact.{}.txt
   data_keys: part_ids                                                                            
   dataset: geometry                                                                                   
-  max_num_part: 20                                                                                    
-  min_num_part: 3
-  total_points: 50000                                                                               
-  overfit: 5
+  max_num_part: 100                                                                                    
+  min_num_part: 2
+  sample_weight: 150000                                                                               
+  overfit: 100
   rot_range: -1.0                                                                                     
-  shuffle_parts: False
+  shuffle_parts: True
   scale: 7
 
 exp:

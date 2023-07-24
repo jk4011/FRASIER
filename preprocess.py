@@ -1,5 +1,8 @@
+import sys
+sys.path.append("src/multi-part-assembly/")
 
-from multi_part_assembly.datasets.geometry_data import build_geometry_dataset, build_geometry_dataloader, save_geometry_dataset
+
+from multi_part_assembly.datasets.geometry_data import build_geometry_dataset, build_geometry_dataloader
 from multi_part_assembly.datasets.geometry_data import GeometryPartDataset
 import jhutil
 import torch
@@ -23,4 +26,8 @@ if __name__ == "__main__":
     if args.min_numpart is not None:
         cfg.data.min_numpart = args.min_numpart
 
-    save_geometry_dataset(cfg)
+    train_set, val_set = build_geometry_dataset(cfg)
+    for data in train_set:
+        
+        # import jhutil; jhutil.jhprint(0000, data)
+        break
