@@ -8,7 +8,8 @@ import jhutil
 import torch
 from torch.utils.data import Dataset, DataLoader
 import argparse
-
+from time import time
+from tqdm import tqdm
 
 if __name__ == "__main__":
     # argparse
@@ -27,7 +28,6 @@ if __name__ == "__main__":
         cfg.data.min_numpart = args.min_numpart
 
     train_set, val_set = build_geometry_dataset(cfg)
-    for data in train_set:
-        
-        # import jhutil; jhutil.jhprint(0000, data)
-        break
+    
+    for data in tqdm(train_set):
+        pass

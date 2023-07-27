@@ -51,7 +51,7 @@ class Fracture:
 
         Args:
             other (Fracture): other frac
-            T (torch.Tensor): homofrac_sety transformation matrix
+            T (torch.Tensor): homographic transformation matrix
 
         Returns:
             new_frac: merged frac
@@ -88,20 +88,10 @@ class Fracture:
 
 
 class FractureSet:
-    def __init__(self, pcd_list, use_similarity=False, use_icp=True):
+    def __init__(self, pcd_list, use_icp=True):
         self.fracs = [Fracture(pcd, merge_state=i, n_removed=0, n_last_removed=0) for i, pcd in enumerate(pcd_list)]
         self.k = 3
-        self.use_similarity = use_similarity
         self.use_icp = use_icp
-        if self.use_similarity:
-            self.update_similarity()
-
-    def update_similarity(self):
-        # TODO: 기존에 있는 similarity를 업데이트하는 방식으로 바꾸기
-        self.feature_lst = torch.stack([pointnext(frac.pcd) for frac in self.fracs], dim=0)
-        self.similarity = self.feature_lst @ self.feature_lst.T  # (n, n)
-        self.similarity = (self.similarity + 1) / 2
-        self.similarity = self.similarity - torch.eye(self.similarity.shape[0])
 
     @property
     def n_removed(self):
@@ -282,7 +272,6 @@ def test_reproduce(n_iter=10, n_obj_threshold=5):
         
         result = FractureSet(pcd_list).search()
         final_frac = result.fracs[0]
-        pcd_xored = final_frac.pcd
 
         import jhutil; jhutil.jhprint(1111, final_frac.merge_state)
         import jhutil; jhutil.jhprint(2222, final_frac.T_dic)

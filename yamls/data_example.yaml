@@ -7,12 +7,13 @@ data:
   dataset: geometry                                                                                   
   max_num_part: 100                                                                                    
   min_num_part: 2
-  sample_weight: 150000                                                                               
-  overfit: 100
+  train_sample_weight: 150000
+  val_sample_weight: 150000                                                                               
+  overfit: -1
   rot_range: -1.0                                                                                     
   shuffle_parts: True
   scale: 7
 
 exp:
-  num_workers: 5
-  batch_size: 1
+  num_workers: 16
+  batch_size: 32
