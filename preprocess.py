@@ -1,9 +1,5 @@
-import sys
-sys.path.append("src/multi-part-assembly/")
-
-
-from multi_part_assembly.datasets.geometry_data import build_geometry_dataset, build_geometry_dataloader
-from multi_part_assembly.datasets.geometry_data import GeometryPartDataset
+from part_assembly.geometry_data import build_geometry_dataset, build_geometry_dataloader
+from part_assembly.geometry_data import GeometryPartDataset
 import jhutil
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -30,4 +26,5 @@ if __name__ == "__main__":
     train_set, val_set = build_geometry_dataset(cfg)
     
     for data in tqdm(train_set):
+        break
         pass
