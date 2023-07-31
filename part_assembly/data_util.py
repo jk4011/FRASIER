@@ -3,6 +3,7 @@ import torch
 import trimesh
 import jhutil
 from tqdm import tqdm
+from scipy.spatial.transform import Rotation as R
 
 
 def _get_broken_pcs_idxs(points, threshold=0.0001):
@@ -134,7 +135,6 @@ def sample_pcd(mesh, is_face_broken,
     if max_n_sample is not None and n_broken_sample + n_skin_sample > max_n_sample:
         if omit_large_n:
             return None
-        # make the sum of two equal to max_sample
         n_broken_sample = int(n_broken_sample * (max_n_sample / (n_broken_sample + n_skin_sample)))
         n_skin_sample = max_n_sample - n_broken_sample
     if min_n_sample is not None and n_broken_sample + n_skin_sample < min_n_sample:
@@ -145,6 +145,9 @@ def sample_pcd(mesh, is_face_broken,
 
     broken_face_weight = area_faces * is_face_broken
     broken_face_weight = broken_face_weight / torch.sum(broken_face_weight)
+
+    # TODO: sample_surface_even으로 바꾸고, broken sample은 face_indices로 판별하기 -> weight 구할 필요 없어짐.
+    # TODO: kaolin.ops.mesh.packed_sample_points 으로 바꾸기
     broken_sample, face_indices = trimesh.sample.sample_surface(
         mesh, n_broken_sample, broken_face_weight.numpy())
     broken_sample = torch.tensor(broken_sample)
@@ -179,15 +182,35 @@ def sample_pcd(mesh, is_face_broken,
 
 
 def sample_from_mesh_info(mesh_info, **kwargs):
-    pcd_20k = {'sample': [], 'normal': [], 'broken_label': []}
+    pcd = {'sample': [], 'broken_label': [], 'file_names': []}
     for i in range(len(mesh_info['meshes'])):
         mesh = mesh_info['meshes'][i]
         is_broken_face = mesh_info['is_broken_face'][i]
+        file_name = mesh_info['file_names'][i]
+
         data = sample_pcd(mesh=mesh, is_face_broken=is_broken_face, **kwargs)
         if data is None:
             continue
-        pcd_20k['sample'].append(data['sample'])
-        pcd_20k['normal'].append(data['normal'])
-        pcd_20k['broken_label'].append(data['broken_label'])
 
-    return pcd_20k
+        pcd['sample'].append(data['sample'])
+        pcd['broken_label'].append(data['broken_label'])
+        pcd['file_names'].append(file_name)
+
+    return pcd
+
+
+def recenter_pc(pc):
+    """pc: [N, 3]"""
+    centroid = pc.mean(axis=0)
+    pc = pc - centroid[None]
+    return pc, centroid
+
+
+def rotate_pc(pc, rot_mat):
+    """pc: [N, 3]"""
+    rot_mat = torch.Tensor(rot_mat)
+    pc = pc @ rot_mat.T
+    quat_gt = R.from_matrix(rot_mat.T).as_quat()
+    # we use scalar-first quaternion
+    quat_gt = quat_gt[[3, 0, 1, 2]]
+    return pc, quat_gt
