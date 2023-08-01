@@ -1,28 +1,24 @@
-import os
-import random
 
-import trimesh
-import numpy as np
+
+import os
 from scipy.spatial.transform import Rotation as R
 
 from torch.utils.data import DataLoader
 import torch
 
-# from knn_cuda import KNN
 from functools import lru_cache
 import jhutil
 
-from copy import copy
 from tqdm import tqdm
 from torch_geometric.data import InMemoryDataset, Dataset
-from time import time
-import shutil
+import sys
+sys.path.append("../")
 from part_assembly.data_util import create_mesh_info, sample_from_mesh_info, recenter_pc, rotate_pc
 
 import argparse
 
 
-class Sample20k(Dataset):
+class SampleDense(Dataset):
     """
     Point cloud dataset for training segmentation model.
     Everey number of point cloud is fixed to 20,000.
@@ -36,7 +32,7 @@ class Sample20k(Dataset):
         data_dir,
         data_fn,
         category='',
-        sample_weight=750000,
+        sample_weight=150000,
         num_points=1000,
         min_num_part=2,
         max_num_part=1000,
@@ -47,7 +43,6 @@ class Sample20k(Dataset):
         max_sample=20000,
         sample_whole=True,  # for stage1+stage2
         dataset_name='artifact',
-        mode='train',  # train, val
     ):
         # for training stage1
         self.max_sample = max_sample
@@ -63,11 +58,8 @@ class Sample20k(Dataset):
         self.rot_range = rot_range  # rotation range in degree
         self.overfit = overfit
         self.dataset_name = dataset_name
-        self.mode = mode
 
         super().__init__(root=data_dir, transform=None, pre_transform=None)
-        self.single_files = os.listdir(self.pcd_20ks_dir_path)
-        self.single_files = [os.path.join(self.pcd_20ks_dir_path, fn) for fn in self.single_files]
 
     @property
     @lru_cache(maxsize=1)
@@ -103,129 +95,80 @@ class Sample20k(Dataset):
 
     @property
     def processed_file_names(self):
+
         mesh_infos = [os.path.join(fn, "mesh_info.pt") for fn in self.raw_file_names]
-        pcd_20ks = [os.path.join(fn, "pcd_20k.pt") for fn in self.raw_file_names]
-        return mesh_infos + pcd_20ks
+        pcd_denses = [os.path.join(fn, "pcd_dense.pt") for fn in self.raw_file_names]
+        return mesh_infos + pcd_denses
 
     def len(self):
-        return len(self.single_files)
+        return len(self.raw_file_names)
 
     @property
     def mesh_info_paths(self):
         return self.processed_paths[:len(self.raw_file_names)]
 
     @property
-    def pcd_20k_paths(self):
-        return self.processed_paths[len(self.raw_file_names): 2 * len(self.raw_file_names)]
-
-    @property
-    def pcd_20ks_dir_path(self):
-        return os.path.join(self.processed_dir, self.dataset_name, f"pcd_20ks_{self.mode}")
+    def pcd_dense_paths(self):
+        return self.processed_paths[len(self.raw_file_names):]
 
     def process(self):
-        assert len(self.mesh_info_paths) == len(self.pcd_20k_paths)
+        assert len(self.mesh_info_paths) == len(self.pcd_dense_paths)
 
         print('1. prcessing mesh_info.pt...')
         create_mesh_info(self.raw_paths, self.mesh_info_paths)
 
-        print('2. prcessing pcd_20k.pt...')
-
-        if not os.path.exists(self.pcd_20ks_dir_path):
-            os.mkdir(self.pcd_20ks_dir_path)
-
-        i = 0
-        for mesh_info_path, pcd_20k_path in tqdm(list(zip(self.mesh_info_paths, self.pcd_20k_paths))):
+        print('2. prcessing pcd_dense.pt...')
+        for mesh_info_path, pcd_dense_path in tqdm(list(zip(self.mesh_info_paths, self.pcd_dense_paths))):
             assert mesh_info_path.endswith("mesh_info.pt")
-            assert pcd_20k_path.endswith("pcd_20k.pt")
+            assert pcd_dense_path.endswith("pcd_dense.pt")
 
-            if os.path.exists(pcd_20k_path):
+            if os.path.exists(pcd_dense_path):
                 continue
 
             mesh_info = torch.load(mesh_info_path)
-            pcd_20k = sample_from_mesh_info(mesh_info,
-                                            sample_weight=self.sample_weight,
-                                            max_n_sample=20000,
-                                            min_n_sample=20000,
-                                            omit_large_n=False,
-                                            omit_small_n=True)
-            directory = os.path.dirname(pcd_20k_path)
+            pcd_dense = sample_from_mesh_info(mesh_info,
+                                              sample_weight=self.sample_weight,
+                                              max_n_sample=None,
+                                              min_n_sample=None,
+                                              omit_large_n=False,
+                                              omit_small_n=False)
+
+            trans, quats = [], []
+            for pc in pcd_dense["sample"]:
+
+                rot_mat = R.random().as_matrix()
+                pc, gt_trans = recenter_pc(pc.float())
+                pc, gt_quat = rotate_pc(pc.float(), rot_mat)
+                trans.append(gt_trans)
+                quats.append(gt_quat)
+
+            pcd_dense["trans"] = trans
+            pcd_dense["quats"] = quats
+
+            directory = os.path.dirname(pcd_dense_path)
             if not os.path.exists(directory):
                 os.makedirs(directory)
-            torch.save(pcd_20k, pcd_20k_path)
+            torch.save(pcd_dense, pcd_dense_path)
 
-            # save pcd_20k.pt as pcd_20ks/{i}.pt
-            samples = pcd_20k["sample"]
-            broken_labels = pcd_20k["broken_label"]
-            for sample, broken_label in zip(samples, broken_labels):
-                single_data = {"sample": sample, "broken_label": broken_label}
-                single_file = os.path.join(self.pcd_20ks_dir_path, f"{i}.pt")
-                torch.save(single_data, single_file)
-                i += 1
-
-    @lru_cache(maxsize=100)
     def get(self, idx):
         idx = idx % len(self)
-        # TODO : stage1+stage2 에 대한 loader도 만들기
-        single_data = torch.load(self.single_files[idx])
-        sample = single_data["sample"]
-        broken_label = single_data["broken_label"]
-
-        rot_mat = R.random().as_matrix()
-        sample, gt_trans = recenter_pc(sample.float())
-        sample, gt_quat = rotate_pc(sample.float(), rot_mat)
-
-        return {
-            'pcd': sample.numpy(),  # (N, p_i, 3)
-            'quat': gt_quat,
-            'trans': gt_trans,
-            'broken_label': broken_label.numpy(),
-        }
+        data = torch.load(self.pcd_dense_paths[idx])
+        return data
 
 
-def build_sample_20k_dataloader(cfg):
-    train_set = build_sample_20k_train_dataset(cfg)
-    val_set = build_sample_20k_val_dataset(cfg)
+def build_sample_dense_dataloader(cfg):
+    test_set = build_sample_dense_dataset(cfg)
 
-    train_loader = DataLoader(
-        dataset=train_set,
-        batch_size=1,
-        shuffle=True,
-    )
-
-    val_loader = DataLoader(
-        dataset=val_set,
+    test_loader = DataLoader(
+        dataset=test_set,
         batch_size=1,
         shuffle=False,
         drop_last=False,
     )
-    return train_loader, val_loader
+    return test_loader
 
 
-def build_sample_20k_train_dataset(cfg):
-    print("building sample_20k train dataset...")
-    print(f"overfit: {cfg.overfit}")
-
-    data_dict = dict(
-        data_dir=cfg.data_dir,
-        data_fn=cfg.data_fn.format('train'),
-        category=cfg.category,
-        min_num_part=cfg.min_num_part,
-        max_num_part=cfg.max_num_part,
-        sample_weight=cfg.sample_weight,
-        shuffle_parts=cfg.shuffle_parts,
-        rot_range=cfg.rot_range,
-        overfit=cfg.overfit,
-        scale=cfg.scale,
-        dataset_name=cfg.data_fn.split('.')[0],
-        mode='train',
-    )
-    return Sample20k(**data_dict)
-
-
-def build_sample_20k_val_dataset(cfg):
-
-    print("building sample_20k val dataset...")
-    print(f"overfit: {cfg.overfit}")
+def build_sample_dense_dataset(cfg):
 
     data_dict = dict(
         data_dir=cfg.data_dir,
@@ -239,6 +182,8 @@ def build_sample_20k_val_dataset(cfg):
         overfit=cfg.overfit,
         scale=cfg.scale,
         dataset_name=cfg.data_fn.split('.')[0],
-        mode='val',
     )
-    return Sample20k(**data_dict)
+
+    test_set = SampleDense(**data_dict)
+
+    return test_set
