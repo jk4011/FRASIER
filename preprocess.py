@@ -1,5 +1,6 @@
-from part_assembly.geometry_data import build_geometry_dataset, build_geometry_dataloader
-from part_assembly.geometry_data import GeometryPartDataset
+from part_assembly.stage1_data import build_sample_20k_train_dataset, build_sample_20k_val_dataset, build_sample_20k_dataloader
+from part_assembly.stage1_data import Sample20k
+from part_assembly.test_data import build_sample_dense_dataloader
 import jhutil
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -7,7 +8,8 @@ import argparse
 from time import time
 from tqdm import tqdm
 
-if __name__ == "__main__":
+
+def preprocess_20k_data():
     # argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--overfit', type=int, default=None)
@@ -17,14 +19,47 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     torch.multiprocessing.set_start_method('spawn')
-    cfg = jhutil.load_yaml("yamls/data_example.yaml")
+    cfg = jhutil.load_yaml("yamls/data_config.yaml")
     if args.overfit is not None:
-        cfg.data.overfit = args.overfit
-    if args.min_numpart is not None:
-        cfg.data.min_numpart = args.min_numpart
+        cfg.data_20k.overfit = args.overfit
+        cfg.data_dense.overfit = args.overfit
 
-    train_set, val_set = build_geometry_dataset(cfg)
-    
-    for data in tqdm(train_set):
-        break
-        pass
+    # train_loader, val_loader = build_sample_20k_dataloader(cfg.data_20k)
+    # train_dataset = build_sample_20k_train_dataset(cfg.data_20k)
+    val_dataset = build_sample_20k_val_dataset(cfg.data_20k)
+
+    pbar = tqdm(enumerate(val_dataset), total=len(val_dataset))
+    for i, data in tqdm(pbar):
+        print(data)
+        # jhutil.jhprint(1111, data)
+        print("\n\n")
+        if i == 3:
+            break
+
+
+def preprocess_dense_data():
+    # argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--overfit', type=int, default=None)
+    parser.add_argument('--min_numpart', type=int, default=None)
+
+    # parse
+    args = parser.parse_args()
+
+    torch.multiprocessing.set_start_method('spawn')
+    cfg = jhutil.load_yaml("yamls/data_config.yaml")
+    if args.overfit is not None:
+        cfg.data_20k.overfit = args.overfit
+        cfg.data_dense.overfit = args.overfit
+
+    val_loader = build_sample_dense_dataloader(cfg.data_20k)
+
+    pbar = tqdm(enumerate(val_loader), total=len(val_loader))
+    for i, data in tqdm(pbar):
+        print(data.keys())
+        print("\n\n")
+
+
+if __name__ == "__main__":
+    # preprocess_20k_data()
+    preprocess_dense_data()

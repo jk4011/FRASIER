@@ -182,7 +182,7 @@ def sample_pcd(mesh, is_face_broken,
 
 
 def sample_from_mesh_info(mesh_info, **kwargs):
-    pcd = {'sample': [], 'broken_label': [], 'file_names': []}
+    pcd = {'sample': [], 'broken_label': [], 'file_names': [], 'dir_name': mesh_info['dir_name']}
     for i in range(len(mesh_info['meshes'])):
         mesh = mesh_info['meshes'][i]
         is_broken_face = mesh_info['is_broken_face'][i]
