@@ -1,6 +1,4 @@
 
-from multi_part_assembly.datasets.geometry_data import build_geometry_dataset, build_geometry_dataloader
-from multi_part_assembly.datasets.geometry_data import GeometryPartDataset
 import jhutil
 import torch
 from torch.utils.data import DataLoader
@@ -14,7 +12,8 @@ import numpy as np
 import sys
 from functools import partial
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../src/geotransformer/experiments/lomatch/'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                '../src/geotransformer/experiments/lomatch/'))
 from config import make_cfg
 from model import create_model
 from geotransformer.utils.data import registration_collate_fn_stack_mode
@@ -26,8 +25,16 @@ cfg_ = make_cfg()
 
 
 def geo_transformer(src, ref):
+    """
+    Args:
+        src (N, 3)
+        ref (M, 3)
+
+    Returns:
+        estimated_transform (torch.Tensor): (4, 4)
+    """
     global model, cfg_
-    
+
     assert isinstance(src, torch.Tensor) and isinstance(ref, torch.Tensor)
     src, ref = src.cpu(), ref.cpu()
     
@@ -39,11 +46,11 @@ def geo_transformer(src, ref):
         model.load_state_dict(model_dict, strict=False)
         model = model.cuda()
         model.eval()
-        
+
     data = stage3_dataloader_format(src, ref)
     data = to_cuda(data)
-
-    ret = model(data)
+    with torch.no_grad():
+        ret = model(data)
     return ret["estimated_transform"].cpu()
 
 

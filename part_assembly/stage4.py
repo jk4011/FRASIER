@@ -9,18 +9,20 @@ from jhutil import to_cuda
 from copy import deepcopy
 from .stage3 import geo_transformer
 from jhutil.log import create_logger
-from multi_part_assembly.datasets.geometry_data import build_geometry_dataset, build_geometry_dataloader
 from jhutil import open3d_icp
 import numpy as np
+import torch.autograd.profiler as profiler
 
 from openpoints.utils import set_random_seed, save_checkpoint, load_checkpoint, resume_checkpoint, setup_logger_dist, \
     cal_model_parm_nums, Wandb, generate_exp_directory, resume_exp_directory, EasyConfig, dist_utils, find_free_port
 
 from openpoints.models import build_model_from_cfg
 from openpoints.dataset import build_dataloader_from_cfg, get_features_by_keys, get_class_weights
+import time
+
+from part_assembly.data_util import pcd_subsample
 
 logger = create_logger()
-
 
 
 class Fracture:
@@ -29,7 +31,7 @@ class Fracture:
         self.merge_state = merge_state
         self.n_removed = n_removed
         self.n_last_removed = n_last_removed
-        
+
         if T_dic is None:
             assert isinstance(merge_state, int)
             T_dic = {merge_state: torch.eye(4)}
@@ -56,6 +58,7 @@ class Fracture:
         Returns:
             new_frac: merged frac
         """
+        
         pcd_transformed = matrix_transform(T, other.pcd)
         new_pcd, n_last_removed = pointcloud_xor(self.pcd, pcd_transformed)
         n_removed = self.n_removed + other.n_removed + n_last_removed
@@ -65,7 +68,7 @@ class Fracture:
             merge_state = [self.merge_state, other.merge_state]
         else:
             merge_state = [other.merge_state, self.merge_state]
-            
+
         other_T_dic = {merge_state: T @ prev_T for merge_state, prev_T in other.T_dic.items()}
         T_dict = {**self.T_dic, **other_T_dic}
 
@@ -89,9 +92,11 @@ class Fracture:
 
 class FractureSet:
     def __init__(self, pcd_list, use_icp=True):
-        self.fracs = [Fracture(pcd, merge_state=i, n_removed=0, n_last_removed=0) for i, pcd in enumerate(pcd_list)]
+        self.n_origin_pcd = sum([pcd.shape[0] for pcd in pcd_list])
+        self.fracs : list[Fracture] = [Fracture(pcd, merge_state=i, n_removed=0, n_last_removed=0) for i, pcd in enumerate(pcd_list)]
         self.k = 3
         self.use_icp = use_icp
+        self.use_similarity = False
 
     @property
     def n_removed(self):
@@ -108,14 +113,29 @@ class FractureSet:
     @property
     def state(self):
         return set([str(frac.merge_state) for frac in self.fracs])
-    
+
     def merge(self, i, j):
+        start = time.time()
         src = self.fracs[i].pcd
         ref = self.fracs[j].pcd
-        T = geo_transformer(src, ref)
+        
+        src_coarse = src.clone()
+        ref_coarse = ref.clone()
+        while len(src_coarse) * len(ref_coarse) > 1e9:
+            src_coarse = pcd_subsample(src_coarse)
+            ref_coarse = pcd_subsample(ref_coarse)
+
+        T = geo_transformer(src_coarse, ref_coarse)
+        geo_transformer_time = time.time() - start
+        
         if self.use_icp:
-            T = open3d_icp(ref, src, trans_init=T)
+            T = open3d_icp(src_coarse, ref_coarse, trans_init=T)
+            
+        icp_time = time.time() - start - geo_transformer_time
+        
         new_frac = self.fracs[i].merge(self.fracs[j], T)
+        pcd_xor_time = time.time() - start - icp_time
+        logger.info(f"geo_transformer_time : {geo_transformer_time:.2f}   icp_time : {icp_time:.2f}   pcd_xor_time : {pcd_xor_time:.2f}")
         del self.fracs[max(i, j)]
         del self.fracs[min(i, j)]
         self.fracs.append(new_frac)
@@ -125,9 +145,11 @@ class FractureSet:
     def search_one_step(self):
         if self.use_similarity:
             pairs = top_k_indices(self.similarity, self.k)
+        elif len(self.fracs) < 4:
+            pairs = [(i, j) for i in range(len(self.fracs)) for j in range(i+1, len(self.fracs))]
         else:
-            # TODO : object 개수 바탕으로 pair 개수 조절하기
-            pairs = [(i, j) for i in range(len(self.fracs)) for j in range(i, len(self.fracs))]
+            top4_idx = np.argsort([frac.pcd.shape[0] for frac in self.fracs])[-4:]
+            pairs = [(top4_idx[i], top4_idx[j]) for i in range(4) for j in range(i+1, 4)]
 
         new_frac_set_lst = []
         for i, j in pairs:
@@ -142,22 +164,24 @@ class FractureSet:
 
     def search(self):
         assert self.depth == 0
+        
         que = PriorityQueue()
         que.put([self.depth, -self.n_removed, self])
-        
+
         # for top k search
         search_count = [0] * self.num_pcd
 
         while not que.empty():
+            
             depth, n_removed, frac_set = que.get()
             n_removed = -n_removed
-            
+
             if search_count[depth] >= self.k:
                 continue
-            
+
             search_count[depth] += 1
-            logger.info(f"state={frac_set.state}   depth={depth}   n_removed={n_removed}   ")
-            
+            logger.info(f"state={frac_set.state}   depth={depth}   n_removed={n_removed}   removed_ratio={(n_removed / self.n_origin_pcd):.2f}")
+
             if depth == self.num_pcd - 1:
                 if search_count != [1] + [self.k] * (self.num_pcd - 2) + [1]:
                     raise Warning(f"search_count is incorrect: {search_count}")
@@ -166,7 +190,7 @@ class FractureSet:
             new_frac_set_lst = frac_set.search_one_step()
             for new_frac_set in new_frac_set_lst:
                 data = [new_frac_set.depth, -new_frac_set.n_removed, new_frac_set]
-                if is_item_in_priority_queue(que, data):
+                if is_item_in_priority_queue(que, frac_set=new_frac_set):
                     continue
                 que.put(data)
 
@@ -184,15 +208,14 @@ class FractureSet:
         return str(self) < str(other)
 
     def __eq__(self, other):
-        return set(self.fracs) == set(other.fracs)
+        return self.depth == other.depth and set(self.fracs) == set(other.fracs)
 
 
-def is_item_in_priority_queue(pq, item):
-    for element in pq.queue:
-        if element == item:
+def is_item_in_priority_queue(pq, frac_set):
+    for _, _, frac_set_compare in pq.queue:
+        if frac_set == frac_set_compare:
             return True
     return False
-
 
 
 def pointcloud_xor(src: torch.Tensor, ref: torch.Tensor, threshold=0.01):
@@ -233,13 +256,13 @@ def top_k_indices(matrix, k, only_triu=True):
 def reproduce(pcd_list, merge_state):
     # TODO: class frac_set로 바꾸기
     left, right = merge_state
-    
+
     if not isinstance(left, int):
         pcd1, n_removed1 = reproduce(pcd_list, left)
     else:
         pcd1 = pcd_list[left]
         n_removed1 = 0
-    
+
     if not isinstance(right, int):
         pcd2, n_removed2 = reproduce(pcd_list, right)
     else:
@@ -248,7 +271,7 @@ def reproduce(pcd_list, merge_state):
 
     T = geo_transformer(pcd1, pcd2)
     pcd2_transformed = matrix_transform(T, pcd2)
-    
+
     pcd_xored, n_removed = pointcloud_xor(pcd1, pcd2_transformed)
     n_removed += n_removed1 + n_removed2
     return pcd_xored, n_removed
@@ -266,10 +289,10 @@ def test_reproduce(n_iter=10, n_obj_threshold=5):
         if i == n_iter:
             break
         i += 1
-        
+
         # TODO: point cloud는 gpu memory에서만 다루기
         # pcd_list = to_cuda(pcd_list)
-        
+
         result = FractureSet(pcd_list).search()
         final_frac = result.fracs[0]
 

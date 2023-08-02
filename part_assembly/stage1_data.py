@@ -48,6 +48,7 @@ class Sample20k(Dataset):
         sample_whole=True,  # for stage1+stage2
         dataset_name='artifact',
         mode='train',  # train, val
+        is_fracture_single=True,
     ):
         # for training stage1
         self.max_sample = max_sample
@@ -64,6 +65,7 @@ class Sample20k(Dataset):
         self.overfit = overfit
         self.dataset_name = dataset_name
         self.mode = mode
+        self.is_fracture_single = is_fracture_single
 
         super().__init__(root=data_dir, transform=None, pre_transform=None)
         self.single_files = os.listdir(self.pcd_20ks_dir_path)
@@ -108,7 +110,10 @@ class Sample20k(Dataset):
         return mesh_infos + pcd_20ks
 
     def len(self):
-        return len(self.single_files)
+        if self.is_fracture_single:
+            return len(self.single_files)
+        else:
+            return len(self.raw_file_names)
 
     @property
     def mesh_info_paths(self):
@@ -163,9 +168,7 @@ class Sample20k(Dataset):
                 i += 1
 
     @lru_cache(maxsize=100)
-    def get(self, idx):
-        idx = idx % len(self)
-        # TODO : stage1+stage2 에 대한 loader도 만들기
+    def load_fracture_single(self, idx):
         single_data = torch.load(self.single_files[idx])
         sample = single_data["sample"]
         broken_label = single_data["broken_label"]
@@ -180,6 +183,36 @@ class Sample20k(Dataset):
             'trans': gt_trans,
             'broken_label': broken_label.numpy(),
         }
+    
+    def load_fracture_set(self, idx):
+        data = torch.load(self.pcd_20k_paths[idx])
+        
+        n = len(data["sample"])
+        
+        pcs, quats, trans, broken_labels = [], [], [], []
+        for i in range(n):
+            rot_mat = R.random().as_matrix()
+            pcd = data["sample"][i]
+            pcd, gt_trans = recenter_pc(pcd.float())
+            pcd, gt_quat = rotate_pc(pcd.float(), rot_mat)
+            
+            pcs.append(pcd.numpy())
+            quats.append(gt_quat)
+            trans.append(gt_trans)
+            broken_labels.append(data["broken_label"][i].numpy())
+        
+        return {
+            'pcs': pcs,  # (N, p_i, 3)
+            'quats': gt_quat,
+            'trans': gt_trans,
+            'broken_labels': broken_labels,
+        }
+    
+    def get(self, idx):
+        if self.is_fracture_single:
+            return self.load_fracture_single(idx)
+        else:
+            return self.load_fracture_set(idx)
 
 
 def build_sample_20k_dataloader(cfg):
@@ -199,6 +232,17 @@ def build_sample_20k_dataloader(cfg):
         drop_last=False,
     )
     return train_loader, val_loader
+
+
+def build_sample_20k_test_loder(cfg):
+    test_set = build_sample_20k_val_dataset(cfg)
+    test_loader = DataLoader(
+        dataset=test_set,
+        batch_size=1,
+        shuffle=False,
+        drop_last=False,
+    )
+    return test_loader
 
 
 def build_sample_20k_train_dataset(cfg):

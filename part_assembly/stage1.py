@@ -5,12 +5,10 @@ from openpoints.utils import set_random_seed, save_checkpoint, load_checkpoint, 
 from openpoints.models import build_model_from_cfg
 from openpoints.dataset import build_dataloader_from_cfg, get_features_by_keys, get_class_weights
 from jhutil import to_cuda
-from multi_part_assembly.datasets.geometry_data import build_geometry_dataloader
+# from multi_part_assembly.datasets.geometry_data import build_geometry_dataloader
 from jhutil import load_yaml
 import torch
 import numpy as np
-
-
 
 
 def subsample(data, voxel_size=0.04, presample=True, split='test', voxel_max=7500, variable=False, shuffle=False):
@@ -45,18 +43,38 @@ def subsample(data, voxel_size=0.04, presample=True, split='test', voxel_max=750
     return data
 
 
+def closest_point(src, dst):
+    dst = dst.reshape(1, dst.shape[0], 3)  # (1, M, 3)
+    
+    chunk_size = 10000
+    src_chunks = torch.chunk(src, src.shape[0] // chunk_size + 1, 0)
+
+    min_dist_indices = []
+
+    for src_chunk in src_chunks:
+        src_chunk = src_chunk.reshape(src_chunk.shape[0], 1, 3)  # (N, 1, 3)
+        dist = src_chunk - dst  # (N, M, 3)
+        min_dist_idx_chunk = torch.argmin(torch.sum(dist ** 2, dim=2), dim=1)
+        min_dist_indices.append(min_dist_idx_chunk)
+
+    min_dist_idx = torch.cat(min_dist_indices, 0)
+
+    return min_dist_idx
+
+
+
 def broken_surface_segmentation(model, data, is_subsample=False, feature_keys='x', all_broken_threshold=5000):
 
     model.eval()
     broken_pcd_list = []
-    for i in range(len(data['pcs'])):        
-        if len(data['pcs'][i][0]) < all_broken_threshold:
-            broken_pcd_list.append(data['pcs'][i].squeeze().cpu())
+    for i in range(len(data['sample'])):
+        if len(data['sample'][i][0]) < all_broken_threshold:
+            broken_pcd_list.append(data['sample'][i].squeeze().cpu())
             continue
 
         data2 = {
-            "pos": data['pcs'][i].float().squeeze()[None, :],
-            "x": data['normals'][i].float().squeeze()[None, :],
+            "pos": data['sample'][i].float(),
+            "x": data['sample'][i].float(),
         }
 
         if is_subsample:
@@ -75,7 +93,7 @@ def broken_surface_segmentation(model, data, is_subsample=False, feature_keys='x
 
 
 def load_pointnext(cfg_path="/data/wlsgur4011/part_assembly/src/pointnext/cfgs/part_assembly/pointnext-l.yaml",
-                   model_path="/data/wlsgur4011/part_assembly/src/pointnext/log/part_assembly/part_assembly-train-pointnext-l-ngpus4-seed133-20230717-164009-iRRq2TtktfTLaggpLBmHea/checkpoint/part_assembly-train-pointnext-l-ngpus4-seed133-20230717-164009-iRRq2TtktfTLaggpLBmHea_ckpt_best.pth"):
+                   model_path="/data/wlsgur4011/part_assembly/src/pointnext/log/part_assembly/part_assembly-train-pointnext-l-ngpus4-seed9811-20230731-192146-4vMpY777YhAjPWULPKuSTZ/checkpoint/part_assembly-train-pointnext-l-ngpus4-seed9811-20230731-192146-4vMpY777YhAjPWULPKuSTZ_ckpt_best.pth"):
     cfg = EasyConfig()
     cfg.load(cfg_path, recursive=True)
 

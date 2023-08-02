@@ -133,7 +133,7 @@ class SampleDense(Dataset):
                                               omit_large_n=False,
                                               omit_small_n=False)
 
-            trans, quats = [], []
+            trans, quats, sample = [], [], []
             for pc in pcd_dense["sample"]:
 
                 rot_mat = R.random().as_matrix()
@@ -141,9 +141,11 @@ class SampleDense(Dataset):
                 pc, gt_quat = rotate_pc(pc.float(), rot_mat)
                 trans.append(gt_trans)
                 quats.append(gt_quat)
+                sample.append(pc)
 
             pcd_dense["trans"] = trans
             pcd_dense["quats"] = quats
+            pcd_dense["sample"] = sample
 
             directory = os.path.dirname(pcd_dense_path)
             if not os.path.exists(directory):
@@ -151,7 +153,6 @@ class SampleDense(Dataset):
             torch.save(pcd_dense, pcd_dense_path)
 
     def get(self, idx):
-        idx = idx % len(self)
         data = torch.load(self.pcd_dense_paths[idx])
         return data
 

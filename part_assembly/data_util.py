@@ -214,3 +214,15 @@ def rotate_pc(pc, rot_mat):
     # we use scalar-first quaternion
     quat_gt = quat_gt[[3, 0, 1, 2]]
     return pc, quat_gt
+
+
+def pcd_subsample(pcd, ratio=1 / 1.414):
+    assert isinstance(pcd, torch.Tensor)
+    assert pcd.dim() == 2
+    assert pcd.size(1) == 3
+
+    N = pcd.size(0)
+    n = int(N * ratio)
+
+    indices = torch.randperm(N)[:n]
+    return pcd[indices]

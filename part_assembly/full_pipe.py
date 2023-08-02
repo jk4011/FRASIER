@@ -1,6 +1,5 @@
 from part_assembly.stage4 import broken_surface_segmentation, load_pointnext
 
-from multi_part_assembly.datasets.geometry_data import build_geometry_dataloader
 from jhutil import load_yaml
 from jhutil import matrix_from_quat_trans, show_multiple_objs
 import os
