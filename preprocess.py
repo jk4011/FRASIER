@@ -58,6 +58,8 @@ def preprocess_dense_data():
     for i, data in tqdm(pbar):
         print(data.keys())
         print("\n\n")
+        if i == 3:
+            break
 
 
 if __name__ == "__main__":

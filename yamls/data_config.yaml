@@ -1,0 +1,35 @@
+data_20k: 
+  category: ''                                                                                  
+  colors: [[0, 204, 0], [204, 0, 0], [0, 204, 0], [127, 127, 0], [127, 0, 127], [0, 127, 127], [76, 153, 0], [153, 0, 76], [76, 0, 153], [153, 76, 0], [76, 0, 153], [153, 0, 76], [204, 51, 127], [204, 51, 127], [51, 204, 127], [51, 127, 204], [127, 51, 204], [127, 204, 51], [76, 76, 178], [76, 178, 76], [178, 76, 76]]
+  data_dir: /data/wlsgur4011/part_assembly/data
+  data_fn: artifact.{}.txt
+  data_keys: part_ids                                                                            
+  dataset: geometry                                                                                   
+  max_num_part: 100                                                                                    
+  min_num_part: 2
+  sample_weight: 750000
+  overfit: -1
+  rot_range: -1.0                                                                                     
+  shuffle_parts: True
+  scale: 7
+
+
+data_dense: 
+  category: ''                                                                                  
+  colors: [[0, 204, 0], [204, 0, 0], [0, 204, 0], [127, 127, 0], [127, 0, 127], [0, 127, 127], [76, 153, 0], [153, 0, 76], [76, 0, 153], [153, 76, 0], [76, 0, 153], [153, 0, 76], [204, 51, 127], [204, 51, 127], [51, 204, 127], [51, 127, 204], [127, 51, 204], [127, 204, 51], [76, 76, 178], [76, 178, 76], [178, 76, 76]]
+  data_dir: /data/wlsgur4011/part_assembly/data
+  data_fn: artifact.{}.txt
+  data_keys: part_ids                                                                            
+  dataset: geometry                                                                                   
+  max_num_part: 100                                                                                    
+  min_num_part: 2
+  sample_weight: 750000
+  overfit: -1
+  rot_range: -1.0                                                                                     
+  shuffle_parts: True
+  scale: 7
+
+
+exp:
+  num_workers: 16
+  batch_size: 32

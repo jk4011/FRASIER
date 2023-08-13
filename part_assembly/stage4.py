@@ -3,6 +3,7 @@ from jhutil import knn
 from typing import Union
 import random
 from queue import PriorityQueue
+import heapq
 from jhutil import matrix_transform
 from jhutil import load_yaml
 from jhutil import to_cuda
@@ -86,7 +87,6 @@ class FractureSet:
         self.fracs : list[Fracture] = [Fracture(pcd, merge_state=frozenset([i]), n_removed=0, n_last_removed=0) for i, pcd in enumerate(pcd_list)]
         self.k = 3
         self.use_icp = use_icp
-        self.use_similarity = False
 
     @property
     def n_removed(self):
@@ -102,7 +102,7 @@ class FractureSet:
 
     @property
     def state(self):
-        return set([str(frac.merge_state) for frac in self.fracs])
+        return set([str(set(frac.merge_state)) for frac in self.fracs])
 
     def merge(self, i, j):
         start = time.time()
@@ -119,7 +119,7 @@ class FractureSet:
         geo_transformer_time = time.time() - start
         
         if self.use_icp:
-            T = open3d_icp(src_coarse, ref_coarse, trans_init=T)
+            T = open3d_icp(src, ref, trans_init=T)
             
         icp_time = time.time() - start - geo_transformer_time
         
@@ -129,22 +129,17 @@ class FractureSet:
         del self.fracs[max(i, j)]
         del self.fracs[min(i, j)]
         self.fracs.append(new_frac)
-        if self.use_similarity:
-            self.update_similarity()
 
     def search_one_step(self):
-        if self.use_similarity:
-            pairs = top_k_indices(self.similarity, self.k)
-        elif len(self.fracs) < 3:
+        k = 4
+        if len(self.fracs) < k:
             pairs = [(i, j) for i in range(len(self.fracs)) for j in range(i+1, len(self.fracs))]
         else:
-            top3_idx = np.argsort([frac.pcd.shape[0] for frac in self.fracs])[-3:]
-            pairs = [(top3_idx[i], top3_idx[j]) for i in range(3) for j in range(i+1, 3)]
+            topk_idx = np.argsort([frac.pcd.shape[0] for frac in self.fracs])[-k:]
+            pairs = [(topk_idx[i], topk_idx[j]) for i in range(k) for j in range(i+1, k)]
 
         new_frac_set_lst = []
         for i, j in pairs:
-            if i == j:
-                continue
             new_frac_set = deepcopy(self)
             new_frac_set.merge(i, j)
             new_frac_set_lst.append(new_frac_set)
@@ -155,15 +150,16 @@ class FractureSet:
     def search(self):
         assert self.depth == 0
         
-        que = PriorityQueue()
-        que.put([self.depth, -self.n_removed, self])
+        pq = []
+        item = [self.depth, -self.n_removed, self]
+        heapq.heappush(pq, item)
 
         # for top k search
         search_count = [0] * self.num_pcd
 
-        while not que.empty():
+        while len(pq) > 0:
             
-            depth, n_removed, frac_set = que.get()
+            depth, n_removed, frac_set = heapq.heappop(pq)
             n_removed = -n_removed
 
             if search_count[depth] >= self.k:
@@ -179,33 +175,33 @@ class FractureSet:
 
             new_frac_set_lst = frac_set.search_one_step()
             for new_frac_set in new_frac_set_lst:
-                data = [new_frac_set.depth, -new_frac_set.n_removed, new_frac_set]
-                if is_item_in_priority_queue(que, frac_set=new_frac_set):
-                    continue
-                que.put(data)
+                pq = push_frac_set(pq, frac_set=new_frac_set)
 
     def __str__(self) -> str:
         return str([str(frac) for frac in self.fracs])
 
     def __gt__(self, other):
-        if self == other:
-            return False
         return str(self) > str(other)
 
     def __lt__(self, other):
-        if self == other:
-            return False
         return str(self) < str(other)
 
-    def __eq__(self, other):
+    def state_eq(self, other):
         return self.depth == other.depth and set(self.fracs) == set(other.fracs)
 
 
-def is_item_in_priority_queue(pq, frac_set):
-    for _, _, frac_set_compare in pq.queue:
-        if frac_set == frac_set_compare:
-            return True
-    return False
+def push_frac_set(pq, frac_set):
+    for i, (_, _, frac_set_compare) in enumerate(pq):
+        
+        if frac_set.state_eq(frac_set_compare):
+            if frac_set.n_removed > frac_set_compare.n_removed:
+                pq[i] = (frac_set.depth, -frac_set.n_removed, frac_set)
+                heapq.heapify(pq)
+                return pq
+            else:
+                return pq
+    heapq.heappush(pq, (frac_set.depth, -frac_set.n_removed, frac_set))
+    return pq
 
 
 def pointcloud_xor(src: torch.Tensor, ref: torch.Tensor, threshold=0.01):
@@ -223,8 +219,8 @@ def pointcloud_xor(src: torch.Tensor, ref: torch.Tensor, threshold=0.01):
         ref_coarse = pcd_subsample(ref_coarse)
         src_threshold *= 1.414
     
-    dist_src, _ = knn(src, ref_coarse)
-    dist_ref, _ = knn(ref, src_coarse)
+    dist_src, _ = knn(src, ref)
+    dist_ref, _ = knn(ref, src)
     
     src = src[dist_src > src_threshold]
     ref = ref[dist_ref > ref_threshold]
