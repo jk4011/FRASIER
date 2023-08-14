@@ -13,12 +13,8 @@ from jhutil.log import create_logger
 from jhutil import open3d_icp
 import numpy as np
 import torch.autograd.profiler as profiler
+from jhutil.debug import memory
 
-from openpoints.utils import set_random_seed, save_checkpoint, load_checkpoint, resume_checkpoint, setup_logger_dist, \
-    cal_model_parm_nums, Wandb, generate_exp_directory, resume_exp_directory, EasyConfig, dist_utils, find_free_port
-
-from openpoints.models import build_model_from_cfg
-from openpoints.dataset import build_dataloader_from_cfg, get_features_by_keys, get_class_weights
 import time
 
 from part_assembly.data_util import pcd_subsample
@@ -129,6 +125,8 @@ class FractureSet:
         del self.fracs[max(i, j)]
         del self.fracs[min(i, j)]
         self.fracs.append(new_frac)
+        
+        torch.cuda.empty_cache()
 
     def search_one_step(self):
         k = 4
@@ -205,6 +203,11 @@ def push_frac_set(pq, frac_set):
 
 
 def pointcloud_xor(src: torch.Tensor, ref: torch.Tensor, threshold=0.01):
+    if len(src) == 0:
+        return ref, 0
+    if len(ref) == 0:
+        return src, 0
+    
     n_origin = src.shape[0] + ref.shape[0]
 
     src_coarse = src.clone()

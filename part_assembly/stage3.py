@@ -37,9 +37,12 @@ def geo_transformer(src, ref):
 
     assert isinstance(src, torch.Tensor) and isinstance(ref, torch.Tensor)
     src, ref = src.cpu(), ref.cpu()
+    if len(src) <= 3 or len(ref) <= 3:
+        return torch.eye(4)
     
     if model is None:
         model = create_model(cfg_)
+        # TODO : breaking bad data에 train 된 모델 사용하기... 뭐야 이게 ㅋㅋㅋㅋㅋ 이러니 안 되지 ㅋㅋㅋㅋㅋ 아마 inference도 다 다시 해야 할 듯
         state_dict = torch.load(
             "/data/wlsgur4011/BreakingBad/GeoTransformer/weights/geotransformer-3dmatch.pth.tar", map_location=torch.device('cpu'))
         model_dict = state_dict['model']
@@ -48,7 +51,17 @@ def geo_transformer(src, ref):
         model.eval()
 
     data = stage3_dataloader_format(src, ref)
+    
+    voxel_size = 0.025
+    while data["lengths"][-1][1] >= 800:
+        voxel_size += 0.005
+        data = stage3_dataloader_format(src, ref, voxel_size=voxel_size)
+        
     data = to_cuda(data)
+    
+    if data["lengths"][-1][0] <= 3 or data["lengths"][-1][1] <= 3:
+        return torch.eye(4)
+    
     with torch.no_grad():
         ret = model(data)
     return ret["estimated_transform"].cpu()
@@ -59,15 +72,17 @@ def collate_fn(
     cfg=None,
     neighbor_limits=np.array([38, 35, 35, 38]),
     precompute_data=True,
+    voxel_size=None
 ):
     if cfg is None:
         global cfg_
         cfg = cfg_
     num_stages = cfg.backbone.num_stages
-    voxel_size = cfg.backbone.init_voxel_size
+    if voxel_size is None:
+        voxel_size = cfg.backbone.init_voxel_size
     search_radius = cfg.backbone.init_radius
     neighbor_limits,
-    collate_fn = partial(
+    collate = partial(
         registration_collate_fn_stack_mode,
         num_stages=num_stages,
         voxel_size=voxel_size,
@@ -75,10 +90,10 @@ def collate_fn(
         neighbor_limits=neighbor_limits,
         precompute_data=precompute_data,
     )
-    return collate_fn([data])
+    return collate([data])
 
 
-def stage3_dataloader_format(src, ref):
+def stage3_dataloader_format(src, ref, voxel_size=None):
     data = {
         "ref_points": src.contiguous(),
         "src_points": ref.contiguous(),
@@ -86,7 +101,7 @@ def stage3_dataloader_format(src, ref):
         "src_feats": torch.ones(len(ref), 1),
         "transform": torch.eye(4),
     }
-    return collate_fn(data)
+    return collate_fn(data, voxel_size=voxel_size)
 
 
 def original_to_stage3(data, src_idx, ref_idx):
