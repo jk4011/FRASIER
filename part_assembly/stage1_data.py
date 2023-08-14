@@ -1,8 +1,4 @@
 import os
-import random
-
-import trimesh
-import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 from torch.utils.data import DataLoader
@@ -10,16 +6,10 @@ import torch
 
 # from knn_cuda import KNN
 from functools import lru_cache
-import jhutil
 
-from copy import copy
 from tqdm import tqdm
 from torch_geometric.data import InMemoryDataset, Dataset
-from time import time
-import shutil
 from part_assembly.data_util import create_mesh_info, sample_from_mesh_info, recenter_pc, rotate_pc
-
-import argparse
 
 
 class Sample20k(Dataset):
@@ -107,7 +97,7 @@ class Sample20k(Dataset):
     def processed_file_names(self):
         mesh_infos = [os.path.join(fn, "mesh_info.pt") for fn in self.raw_file_names]
         pcd_20ks = [os.path.join(fn, "pcd_20k.pt") for fn in self.raw_file_names]
-        return mesh_infos + pcd_20ks
+        return mesh_infos + pcd_20ks + ["tmp.tmp"]
 
     def len(self):
         if self.is_fracture_single:
@@ -142,6 +132,7 @@ class Sample20k(Dataset):
         for mesh_info_path, pcd_20k_path in tqdm(list(zip(self.mesh_info_paths, self.pcd_20k_paths))):
             assert mesh_info_path.endswith("mesh_info.pt")
             assert pcd_20k_path.endswith("pcd_20k.pt")
+            assert os.path.dirname(mesh_info_path) == os.path.dirname(pcd_20k_path)
 
             if os.path.exists(pcd_20k_path):
                 continue

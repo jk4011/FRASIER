@@ -4,6 +4,7 @@ import trimesh
 import jhutil
 from tqdm import tqdm
 from scipy.spatial.transform import Rotation as R
+from jhutil import knn
 
 
 def _get_broken_pcs_idxs(points, threshold=0.0001):
@@ -28,6 +29,11 @@ def _get_broken_pcs_idxs(points, threshold=0.0001):
 def _box_overlap(src, ref):
     # src : (N, 3)
     # ref : (M, 3)
+    if not isinstance(src, torch.Tensor):
+        src = torch.Tensor(src)
+    if not isinstance(ref, torch.Tensor):
+        ref = torch.Tensor(ref)
+    
     src_min = src.min(axis=0)[0]  # (3,)
     src_max = src.max(axis=0)[0]  # (3,)
     ref_min = ref.min(axis=0)[0]  # (3,)
@@ -107,6 +113,8 @@ def create_mesh_info(raw_paths, processed_paths):
         data = _parse_data(data_folder)
         if data is None:
             continue
+        
+        data["overlap_ratio"] = _get_overlap_ratio(data)
 
         directory = os.path.dirname(processed_path)
         if not os.path.exists(directory):
@@ -226,3 +234,49 @@ def pcd_subsample(pcd, ratio=1 / 1.414):
 
     indices = torch.randperm(N)[:n]
     return pcd[indices]
+
+
+def _get_overlap_ratio(data):
+    """Read mesh and sample point cloud from a folder."""
+
+
+    meshes = data["meshes"]
+    # is_broken_vertices = data["is_broken_vertices"]
+    is_broken_face = data["is_broken_face"]
+
+    overlap_ratios = torch.zeros(len(meshes), len(meshes))
+    for i in range(len(meshes)):
+        face_areas = meshes[i].area_faces
+        broken_areas = face_areas[is_broken_face[i]].sum()
+
+        for j in range(len(meshes)):
+            if i == j:
+                overlap_ratios[i][j] = -1
+                continue
+            if not _box_overlap(meshes[i].vertices, meshes[j].vertices):
+                continue
+            overlap_ratios[i][j] = _get_joint_area(meshes[i], meshes[j]) / broken_areas
+
+    # assert overlap_ratios.sum().abs() / len(meshes) < 0.03
+    
+    return overlap_ratios
+
+
+def _get_joint_area(src_mesh, ref_mesh, threshold=0.0001):
+
+    src_v = torch.Tensor(src_mesh.vertices)  # (v, 3)
+    ref_v = torch.Tensor(ref_mesh.vertices)  # (w, 3)
+
+    distances, _ = knn(src_v, ref_v, k=1)
+    src_v_is_joint = (distances < threshold).ravel()  # (v, ) ∈ {0, 1}
+
+    src_faces = torch.Tensor(src_mesh.faces)     # (f_i, 3) ∈ {0, ..., v-1}
+    src_f_is_joint = torch.zeros(len(src_faces))  # (f_i, ) ∈ {0, 1}
+    for i, face_v in enumerate(src_faces):
+        face_v_is_joint = src_v_is_joint[face_v.long()]  # (3, ) ∈ {0, 1}
+        src_f_is_joint[i] = torch.all(face_v_is_joint)
+
+    area_faces = torch.Tensor(src_mesh.area_faces)
+    joint_area = (area_faces * src_f_is_joint).sum()
+
+    return joint_area
