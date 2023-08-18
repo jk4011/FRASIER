@@ -33,7 +33,7 @@ def _box_overlap(src, ref):
         src = torch.Tensor(src)
     if not isinstance(ref, torch.Tensor):
         ref = torch.Tensor(ref)
-    
+
     src_min = src.min(axis=0)[0]  # (3,)
     src_max = src.max(axis=0)[0]  # (3,)
     ref_min = ref.min(axis=0)[0]  # (3,)
@@ -107,13 +107,13 @@ def create_mesh_info(raw_paths, processed_paths):
     assert len(raw_paths) == len(processed_paths)
     for data_folder, processed_path in tqdm(list(zip(raw_paths, processed_paths))):
         assert processed_path.endswith("mesh_info.pt")
-        if os.path.exists(processed_path):
+        if os.path.exists(processed_path) and "overlap_ratio" in torch.load(processed_path):
             continue
 
         data = _parse_data(data_folder)
         if data is None:
             continue
-        
+
         data["overlap_ratio"] = _get_overlap_ratio(data)
 
         directory = os.path.dirname(processed_path)
@@ -207,6 +207,40 @@ def sample_from_mesh_info(mesh_info, **kwargs):
     return pcd
 
 
+def sample_broken_noisy(mesh_info, **kwargs):
+    is_pts_broken_all = mesh_info['is_broken_vertices']
+    meshes = mesh_info["meshes"]
+    
+    
+    is_broken_face_all = []
+    for is_pts_broken, mesh in zip(is_pts_broken_all, meshes):
+        faces = torch.Tensor(mesh.faces)
+        is_face_broken = []  # (f_i, )
+        for vertex_idx in faces:
+            vertex_idx = vertex_idx.long()
+            is_vertex_broken = is_pts_broken[vertex_idx]  # (3, )
+            is_face_broken.append(torch.any(is_vertex_broken))
+        is_broken_face_all.append(torch.tensor(is_face_broken))
+    
+    pcd = {'broken_pcs': [], 'file_names': [], 'dir_name': mesh_info['dir_name']}
+    for i in range(len(mesh_info['meshes'])):
+        mesh = mesh_info['meshes'][i]
+        # is_broken_face = mesh_info['is_broken_face'][i]
+        file_name = mesh_info['file_names'][i]
+        is_broken_face = is_broken_face_all[i]
+        
+        # TODO: random adjacent index를 true로 바꿔주기
+        
+        data = sample_pcd(mesh=mesh, is_face_broken=is_broken_face, **kwargs)
+        if data is None:
+            continue
+
+        pcd['broken_pcs'].append(data['sample'][data['broken_label']])
+        pcd['file_names'].append(file_name)
+
+    return pcd
+
+
 def recenter_pc(pc):
     """pc: [N, 3]"""
     centroid = pc.mean(axis=0)
@@ -239,27 +273,26 @@ def pcd_subsample(pcd, ratio=1 / 1.414):
 def _get_overlap_ratio(data):
     """Read mesh and sample point cloud from a folder."""
 
-
     meshes = data["meshes"]
     # is_broken_vertices = data["is_broken_vertices"]
     is_broken_face = data["is_broken_face"]
 
-    overlap_ratios = torch.zeros(len(meshes), len(meshes))
+    overlap_ratio = torch.zeros(len(meshes), len(meshes))
     for i in range(len(meshes)):
         face_areas = meshes[i].area_faces
         broken_areas = face_areas[is_broken_face[i]].sum()
 
         for j in range(len(meshes)):
             if i == j:
-                overlap_ratios[i][j] = -1
+                overlap_ratio[i][j] = -1
                 continue
             if not _box_overlap(meshes[i].vertices, meshes[j].vertices):
                 continue
-            overlap_ratios[i][j] = _get_joint_area(meshes[i], meshes[j]) / broken_areas
+            overlap_ratio[i][j] = _get_joint_area(meshes[i], meshes[j]) / broken_areas
 
-    # assert overlap_ratios.sum().abs() / len(meshes) < 0.03
-    
-    return overlap_ratios
+    # assert overlap_ratio.sum().abs() / len(meshes) < 0.03
+
+    return overlap_ratio
 
 
 def _get_joint_area(src_mesh, ref_mesh, threshold=0.0001):

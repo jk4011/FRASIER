@@ -8,7 +8,7 @@ import torch
 from functools import lru_cache
 
 from tqdm import tqdm
-from torch_geometric.data import InMemoryDataset, Dataset
+from torch_geometric.data import Dataset
 from part_assembly.data_util import create_mesh_info, sample_from_mesh_info, recenter_pc, rotate_pc
 
 
@@ -97,7 +97,7 @@ class Sample20k(Dataset):
     def processed_file_names(self):
         mesh_infos = [os.path.join(fn, "mesh_info.pt") for fn in self.raw_file_names]
         pcd_20ks = [os.path.join(fn, "pcd_20k.pt") for fn in self.raw_file_names]
-        return mesh_infos + pcd_20ks + ["tmp.tmp"]
+        return mesh_infos + pcd_20ks
 
     def len(self):
         if self.is_fracture_single:
@@ -174,31 +174,31 @@ class Sample20k(Dataset):
             'trans': gt_trans,
             'broken_label': broken_label.numpy(),
         }
-    
+
     def load_fracture_set(self, idx):
         data = torch.load(self.pcd_20k_paths[idx])
-        
+
         n = len(data["sample"])
-        
+
         pcs, quats, trans, broken_labels = [], [], [], []
         for i in range(n):
             rot_mat = R.random().as_matrix()
             pcd = data["sample"][i]
             pcd, gt_trans = recenter_pc(pcd.float())
             pcd, gt_quat = rotate_pc(pcd.float(), rot_mat)
-            
+
             pcs.append(pcd.numpy())
             quats.append(gt_quat)
             trans.append(gt_trans)
             broken_labels.append(data["broken_label"][i].numpy())
-        
+
         return {
             'pcs': pcs,  # (N, p_i, 3)
             'quats': gt_quat,
             'trans': gt_trans,
             'broken_labels': broken_labels,
         }
-    
+
     def get(self, idx):
         if self.is_fracture_single:
             return self.load_fracture_single(idx)
