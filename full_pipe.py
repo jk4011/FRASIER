@@ -1,6 +1,4 @@
 import torch
-tmp = torch.randn(1).cuda()
-
 import sys
 # sys.path.append("../")
 sys.path.append("./src/pointnext")
