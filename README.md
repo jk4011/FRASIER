@@ -3,4 +3,4 @@ This is the official Implementation of `Fracture Assembly with Segmentation and 
 
 # Maintainance
 Note that I'm not working on this repository anymore. 
-I do feel sorry for the code quality. 
+I do feel sorry for the spaghetti code. 
