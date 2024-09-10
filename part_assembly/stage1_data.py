@@ -121,6 +121,8 @@ class Sample20k(Dataset):
         assert len(self.mesh_info_paths) == len(self.pcd_20k_paths)
 
         print('1. prcessing mesh_info.pt...')
+        from jhutil import color_log; color_log(1111, self.raw_paths)
+        from jhutil import color_log; color_log(2222, self.mesh_info_paths)
         create_mesh_info(self.raw_paths, self.mesh_info_paths)
 
         print('2. prcessing pcd_20k.pt...')

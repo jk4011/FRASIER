@@ -88,5 +88,5 @@ def preprocess_broken_noisy_data():
 
 if __name__ == "__main__":
     # preprocess_20k_data()
-    preprocess_dense_data()
-    # preprocess_broken_noisy_data()
+    # preprocess_dense_data()
+    preprocess_broken_noisy_data()

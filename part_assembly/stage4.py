@@ -16,6 +16,7 @@ import torch.autograd.profiler as profiler
 from jhutil.debug import memory
 
 import time
+import gc
 
 from part_assembly.data_util import pcd_subsample
 
@@ -52,6 +53,10 @@ class Fracture:
         
         pcd_transformed = matrix_transform(T, other.pcd)
         new_pcd, n_last_removed = pointcloud_xor(self.pcd, pcd_transformed)
+        # TODO: new_pcd가 크면 조금 줄여주셈.
+        if len(new_pcd) > 100000:
+            new_pcd = pcd_subsample(new_pcd)
+        
         n_removed = self.n_removed + other.n_removed + n_last_removed
         
         merge_state = self.merge_state.union(other.merge_state)
@@ -107,11 +112,22 @@ class FractureSet:
         
         src_coarse = src.clone()
         ref_coarse = ref.clone()
-        while len(src_coarse) * len(ref_coarse) > 1e9:
+        while len(src_coarse) * len(ref_coarse) > 3e8:
             src_coarse = pcd_subsample(src_coarse)
             ref_coarse = pcd_subsample(ref_coarse)
 
-        T = geo_transformer(src_coarse, ref_coarse)
+        
+        from jhutil import color_log; color_log(1111, src_coarse)
+        from jhutil import color_log; color_log(2222, ref_coarse)
+        try:
+            T = geo_transformer(src_coarse, ref_coarse)
+        except:
+            T = torch.eye(4)
+            gc.collect()
+            torch.cuda.empty_cache()
+            src_coarse = pcd_subsample(src_coarse)
+            ref_coarse = pcd_subsample(ref_coarse)
+            
         geo_transformer_time = time.time() - start
         
         if self.use_icp:

@@ -2,10 +2,10 @@
 from openpoints.utils import set_random_seed, save_checkpoint, load_checkpoint, resume_checkpoint, setup_logger_dist, \
     cal_model_parm_nums, Wandb, generate_exp_directory, resume_exp_directory, EasyConfig, dist_utils, find_free_port
 
-from openpoints.models import build_model_from_cfg
-from openpoints.dataset import build_dataloader_from_cfg, get_features_by_keys, get_class_weights
+# from openpoints.models import build_model_from_cfg
+# from openpoints.dataset import build_dataloader_from_cfg, get_features_by_keys, get_class_weights
 from jhutil import to_cuda
-# from multi_part_assembly.datasets.geometry_data import build_geometry_dataloader
+from multi_part_assembly.datasets.geometry_data import build_geometry_dataloader
 from jhutil import load_yaml
 import torch
 import numpy as np
@@ -92,8 +92,8 @@ def broken_surface_segmentation(model, data, is_subsample=False, feature_keys='x
     return broken_pcd_list
 
 
-def load_pointnext(cfg_path="/data/wlsgur4011/part_assembly/src/pointnext/cfgs/part_assembly/pointnext-l.yaml",
-                   model_path="/data/wlsgur4011/part_assembly/src/pointnext/log/part_assembly/part_assembly-train-pointnext-l-ngpus4-seed9811-20230731-192146-4vMpY777YhAjPWULPKuSTZ/checkpoint/part_assembly-train-pointnext-l-ngpus4-seed9811-20230731-192146-4vMpY777YhAjPWULPKuSTZ_ckpt_best.pth"):
+def load_pointnext(cfg_path="/data2/wlsgur4011/FRASIER/src/pointnext/cfgs/part_assembly/pointnext-l.yaml",
+                   model_path="/data2/wlsgur4011/FRASIER/src/pointnext/log/part_assembly/part_assembly-train-pointnext-l-ngpus4-seed9811-20230731-192146-4vMpY777YhAjPWULPKuSTZ/checkpoint/part_assembly-train-pointnext-l-ngpus4-seed9811-20230731-192146-4vMpY777YhAjPWULPKuSTZ_ckpt_best.pth"):
     cfg = EasyConfig()
     cfg.load(cfg_path, recursive=True)
 
@@ -108,7 +108,7 @@ def stage1_preprocess(overfit=5,
                       train_data_path="/data/wlsgur4011/DataCollection/BreakingBad/data_split/preprocessed_artifact.val.pth",
                       val_data_path="/data/wlsgur4011/DataCollection/BreakingBad/data_split/preprocessed_artifact.train.pth"):
     pointnext = load_pointnext().cuda()
-    data_cfg = load_yaml("/data/wlsgur4011/part_assembly/yamls/data_example.yaml")
+    data_cfg = load_yaml("/data2/wlsgur4011/FRASIER/yamls/data_example.yaml")
     train_loader, val_loader = build_geometry_dataloader(data_cfg, use_saved=True)
 
     broken_pcd_list = []

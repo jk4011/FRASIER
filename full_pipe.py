@@ -25,19 +25,22 @@ def run_full_pipe():
     args = parser.parse_args()
 
     # load test loader
-    cfg = load_yaml("/data/wlsgur4011/part_assembly/yamls/data_config.yaml")
+    cfg = load_yaml("/data2/wlsgur4011/FRASIER/yamls/data_config.yaml")
     test_loader_dense = build_sample_dense_dataloader(cfg.data_dense)
 
     # load stage1 model
-    pointnext = load_pointnext()
+    # pointnext = load_pointnext()
 
     tbar = tqdm(enumerate(test_loader_dense), total=len(test_loader_dense))
-
+    
+    import warnings
+    warnings.filterwarnings("ignore", category=UserWarning)
+    
     for i, data in tbar:
         
         if i % args.total_process != args.process_rank:
             continue
-        dir_path = os.path.join(data['dir_name'][0].replace("raw", "processed"), "transforms.pt")
+        dir_path = os.path.join(data['dir_name'][0].replace("raw", "result"), "transforms.pt")
         
         if os.path.exists(dir_path):
             continue
@@ -45,9 +48,9 @@ def run_full_pipe():
         n = len(data['sample'])
         # TODO: 현재 2분정도 걸리는데 더 최적화 해야 할 듯
 
-        pcd_list = broken_surface_segmentation(pointnext, data, all_broken_threshold=1024)
-        import jhutil; jhutil.jhprint(1111, pcd_list, list_one_line=False)
-        # pcd_list = [pcd[idx].float() for pcd, idx in zip(data['sample'], data['broken_label'])]
+        # pcd_list = broken_surface_segmentation(pointnext, data, all_broken_threshold=1024)
+        # import jhutil; jhutil.jhprint(1111, pcd_list, list_one_line=False)
+        pcd_list = [pcd[idx].float() for pcd, idx in zip(data['sample'], data['broken_label'])]
 
         result = FractureSet(pcd_list).search()
         final_node = result.fracs[0]
@@ -65,11 +68,14 @@ def run_full_pipe():
 
         folder_path = data['dir_name'][0]
 
-        file_list = os.listdir(folder_path)
-        file_list = [os.path.join(folder_path, file) for file in file_list]
+        # file_list = os.listdir(folder_path)
+        # file_list = [os.path.join(folder_path, file) for file in file_list]
         # show_multiple_objs(file_list, transformations=gt_transforms_restored, scale=7)
 
-        dir_path = os.path.join(data['dir_name'][0].replace("raw", "processed"), "transforms.pt")
+        dir_path = os.path.join(data['dir_name'][0].replace("raw", "result"), "transforms.pt")
+        # mkdir path recursively
+        os.makedirs(os.path.dirname(dir_path), exist_ok=True)
+        
         torch.save(transforms_restored, dir_path)
         print(f"saved to {dir_path}")
 

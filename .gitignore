@@ -1,0 +1,15 @@
+.vscode
+*.pyc
+*.zip
+splits
+images/
+*.pth
+*.pkl
+train/
+val/
+wandb/
+tmp*
+__pycache__
+data
+data*
+log
